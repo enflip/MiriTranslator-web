@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiriTranslator — SPA harness (late render + re-render)</title>
+</head>
+<body>
+<div id="fixture"></div>
+<script src="./gm-shim.js"></script>
+<script>
+fetch('./spa.html')
+  .then((r) => r.text())
+  .then((html) => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    document.title = doc.title;
+    document.getElementById('fixture').innerHTML = doc.body.innerHTML;
+    const style = doc.querySelector('style');
+    if (style) document.head.appendChild(style.cloneNode(true));
+    // Re-run the page's own script so it renders late / re-renders later.
+    for (const sc of doc.querySelectorAll('script')) {
+      const el = document.createElement('script');
+      el.textContent = sc.textContent;
+      document.body.appendChild(el);
+    }
+    const s = document.createElement('script');
+    s.src = '../miri-translate.user.js?v=' + Date.now();
+    document.body.appendChild(s);
+  });
+</script>
+</body>
+</html>

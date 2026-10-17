@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiriTranslator — per-character DOM harness</title>
+</head>
+<body>
+<div id="fixture"></div>
+<script src="./gm-shim.js"></script>
+<script>
+fetch('./chars.html')
+  .then((r) => r.text())
+  .then((html) => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    document.title = doc.title;
+    document.getElementById('fixture').innerHTML = doc.body.innerHTML;
+    const style = doc.querySelector('style');
+    if (style) document.head.appendChild(style.cloneNode(true));
+    for (const sc of doc.querySelectorAll('script')) {
+      const el = document.createElement('script');
+      el.textContent = sc.textContent;
+      document.body.appendChild(el);
+    }
+    const s = document.createElement('script');
+    s.src = '../miri-translate.user.js?v=' + Date.now();
+    document.body.appendChild(s);
+  });
+</script>
+</body>
+</html>

@@ -1,13 +1,21 @@
-/** Instance reference so the service layer can reach the active translator. */
+﻿/** Instance reference so the service layer can reach the active translator. */
   const translatorRef = { current: null };
 
   // ==========================================================================
   // 60 — DOM translation engine
   //
-  // Text nodes are grouped by their nearest *block-level* ancestor so that a
-  // paragraph (or a sentence spread across inline tags) becomes one translation
-  // unit. Units are joined with "\n" — every engine we ship preserves line
-  // breaks, which lets us map the response back onto the individual nodes.
+  // Two shapes of source have to be handled:
+  //
+  //  1. Ordinary pages. Text nodes are grouped by their nearest block-level
+  //     ancestor, so a paragraph (or a sentence spread across inline tags)
+  //     becomes one translation unit. Units are joined with "\n" — every engine
+  //     preserves line breaks, which lets us map the response back onto the
+  //     individual nodes.
+  //
+  //  2. Character-split editors (Cosense/scrapbox, some search UIs, a11y
+  //     widgets) wrap *every single character* in its own <span>. Those one-char
+  //     nodes are useless on their own, so a parent that is made mostly of tiny
+  //     nodes is collapsed into one unit and replaced wholesale.
   // ==========================================================================
 
   const SKIP_TAGS = new Set([
@@ -31,6 +39,16 @@
     'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HGROUP', 'HR', 'LI', 'MAIN', 'NAV',
     'OL', 'P', 'SECTION', 'TABLE', 'TBODY', 'TD', 'TFOOT', 'TH', 'THEAD', 'TR', 'UL',
   ]);
+
+  /** Elements a per-character container is allowed to hold. */
+  const INLINE_TAGS = new Set(['SPAN', 'B', 'I', 'EM', 'STRONG', 'U', 'S', 'SUB', 'SUP', 'BR', 'A', 'SMALL']);
+
+  // Cosense/scrapbox emits one <span class="char-index"> per character, so a
+  // real line is 60+ nodes of exactly one character each. We collapse such a
+  // container into a single translatable unit instead of trying to translate
+  // one-character fragments (which never survive the round trip).
+  const FRAGMENT_MIN_NODES = 4;
+  const FRAGMENT_MAX_NODE = 2;
 
   /** Nearest block-level ancestor, or null when we reach <body>/<html>. */
   function blockAnchor(node) {
@@ -62,12 +80,45 @@
   const leadingWs = (s) => (s.match(/^\s*/) || [''])[0];
   const trailingWs = (s) => (s.match(/\s*$/) || [''])[0];
 
+  /**
+   * Is this element a per-character container? True only when every piece of
+   * text inside it is a tiny node and nothing but inline elements is inside, so
+   * ordinary markup like `<p>See <a>docs</a></p>` is never mistaken for one.
+   */
+  function isFragmentContainer(el) {
+    if (!el || SKIP_TAGS.has(el.tagName)) return false;
+    if (el.hasAttribute && el.hasAttribute('data-mt')) return false;
+    let nodes = 0;
+    for (const child of el.childNodes) {
+      if (child.nodeType === 3) {
+        const v = child.nodeValue.trim();
+        if (!v) continue;
+        if (v.length > FRAGMENT_MAX_NODE) return false;
+        nodes += 1;
+      } else if (child.nodeType === 1) {
+        if (!INLINE_TAGS.has(child.tagName)) return false;
+        const text = (child.textContent || '').trim();
+        if (text.length > FRAGMENT_MAX_NODE) return false;
+        if (text) nodes += 1;
+      }
+    }
+    return nodes >= FRAGMENT_MIN_NODES;
+  }
+
   class PageTranslator {
     constructor() {
       /** @type {Map<Text, {original:string, applied:string|null, originalSpan?:Element}>} */
       this.nodes = new Map();
+      /** Collapsed containers: element -> {html, applied}. */
+      this.fragments = new Map();
       /** Elements we inserted, removed again on revert. */
       this.inserted = new Set();
+      /**
+       * Whether the page is currently translated. Deliberately NOT derived from
+       * the maps: pruning drops every entry of a page that re-rendered itself,
+       * and the observer must keep following it even with nothing tracked yet.
+       */
+      this.enabled = false;
       this.active = false;
       this.observer = null;
       this._applying = false;
@@ -75,7 +126,7 @@
     }
 
     get isTranslated() {
-      return this.nodes.size > 0;
+      return this.enabled;
     }
 
     buildSelector() {
@@ -87,15 +138,50 @@
       return parts.join(', ');
     }
 
+    /** Drop references to nodes the page has already discarded (SPAs). */
+    prune() {
+      let dropped = 0;
+      for (const [node] of this.nodes) {
+        if (!node.isConnected) {
+          this.nodes.delete(node);
+          dropped += 1;
+        }
+      }
+      for (const [el] of this.fragments) {
+        if (!el.isConnected) {
+          this.fragments.delete(el);
+          dropped += 1;
+        }
+      }
+      return dropped;
+    }
+
     /**
      * Collect translation units under `root`.
-     * @returns {Array<{anchor:Element, items:Array, text:string}>}
+     * @returns {Array<{kind:string, anchor:Element, items:Array, text:string}>}
      */
     collect(root = document.body) {
       const skipSelector = this.buildSelector();
       const minLen = Math.max(0, store.get().minNodeLength | 0);
+      /** @type {Map<Element, {anchor:Element, items:Array}>} */
       const groups = new Map();
 
+      // --- Pass 1: locate per-character containers (Cosense/scrapbox & co). ---
+      const fragmentRoots = new Set();
+      const elementWalker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+        acceptNode: (candidate) =>
+          fragmentRoots.has(candidate.parentElement || candidate)
+            ? NodeFilter.FILTER_REJECT
+            : NodeFilter.FILTER_ACCEPT,
+      });
+      let el;
+      while ((el = elementWalker.nextNode())) {
+        if (!el.textContent || !el.textContent.trim()) continue;
+        if (!isFragmentContainer(el)) continue;
+        fragmentRoots.add(el);
+      }
+
+      // --- Pass 2: walk text nodes, skipping anything inside a fragment root. ---
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
         acceptNode(node) {
           const parent = node.parentElement;
@@ -115,33 +201,53 @@
         },
       });
 
-      const groupsMap = groups;
-      let current;
-      while ((current = walker.nextNode())) {
-        if (this.nodes.has(current)) continue; // already processed
-        if (!current.isConnected) continue;
-        const anchor = blockAnchor(current);
-        if (!anchor) continue;
-        const raw = current.nodeValue;
+      let node;
+      while ((node = walker.nextNode())) {
+        if (this.nodes.has(node) || !node.isConnected) continue;
+        const parent = node.parentElement;
+        const raw = node.nodeValue;
         const core = raw.trim();
         if (!core) continue;
-        if (!groupsMap.has(anchor)) groupsMap.set(anchor, { anchor, items: [] });
-        groupsMap.get(anchor).items.push({
-          node: current,
+
+        let insideFragment = false;
+        for (let up = parent; up && up !== root; up = up.parentElement) {
+          if (fragmentRoots.has(up)) {
+            insideFragment = true;
+            break;
+          }
+        }
+        if (insideFragment) continue;
+
+        const anchor = blockAnchor(node);
+        if (!anchor) continue;
+        if (!groups.has(anchor)) groups.set(anchor, { anchor, items: [] });
+        groups.get(anchor).items.push({
+          node,
           text: core,
           lead: leadingWs(raw),
           tail: trailingWs(raw),
         });
       }
 
-      // Split oversized groups so no single request exceeds ~2500 characters.
       const units = [];
-      for (const group of groupsMap.values()) {
+
+      // --- Pass 3: one unit per fragment container, whole line in, whole line out. ---
+      for (const fragEl of fragmentRoots) {
+        if (!fragEl.isConnected || this.fragments.has(fragEl)) continue;
+        const text = (fragEl.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!hasWords(text)) continue;
+        this.fragments.set(fragEl, { html: fragEl.innerHTML, applied: null });
+        units.push({ kind: 'frag', anchor: fragEl, el: fragEl, text });
+      }
+
+      // --- Pass 4: split oversized groups so no request exceeds ~2500 characters. ---
+      for (const group of groups.values()) {
         let chunkItems = [];
         let chunkLen = 0;
         const flush = () => {
           if (!chunkItems.length) return;
           units.push({
+            kind: 'text',
             anchor: group.anchor,
             items: chunkItems,
             text: chunkItems.map((it) => it.text).join('\n'),
@@ -159,25 +265,23 @@
       return units;
     }
 
+
     /**
      * Translate every unit under the page.
      * @param {{source:string, target:string, engineId?:string, mode?:string, signal?:AbortSignal}} opts
-     * @param {(info:{done:number,total:number})=>void} onProgress
      */
-    async translate(opts, onProgress) {
+    async translate(opts) {
       if (this.active) return;
+      this.prune();
       const units = this.collect(opts.root || document.body);
-      if (!units.length) {
-        if (onProgress) onProgress({ done: 0, total: 0 });
-        return;
-      }
+      if (!units.length) return;
       this.active = true;
       const controller = new AbortController();
       const signal = opts.signal || controller.signal;
 
       // Register originals up-front so the observer (and a re-run) skip them.
-      // The *raw* node value is kept so a revert restores the byte-exact page.
       for (const unit of units) {
+        if (unit.kind === 'frag') continue;
         for (const item of unit.items) {
           if (!this.nodes.has(item.node)) {
             this.nodes.set(item.node, {
@@ -192,6 +296,7 @@
       const mode = opts.mode || store.get().mode;
       try {
         await service.translateUnits(units, { ...opts, signal, mode });
+        this.enabled = true;
       } finally {
         this.active = false;
         this._applying = false;
@@ -201,6 +306,7 @@
     /** Restore every node we touched and remove everything we inserted. */
     revert() {
       this.stopObserving();
+      this.enabled = false;
       for (const [node, rec] of Array.from(this.nodes)) {
         if (rec.originalSpan && rec.originalSpan.parentNode) {
           rec.originalSpan.replaceWith(document.createTextNode(rec.original));
@@ -208,32 +314,49 @@
           node.nodeValue = rec.original;
         }
       }
+      for (const [el, rec] of Array.from(this.fragments)) {
+        if (el.isConnected && rec.html != null) el.innerHTML = rec.html;
+      }
       for (const el of Array.from(this.inserted)) {
         if (el.parentNode) el.remove();
       }
       this.inserted.clear();
       this.nodes.clear();
+      this.fragments.clear();
       service.clearCache();
     }
 
     // -------------------------------------------------------------- apply
     applyUnit(unit, translatedText, mode) {
-      const lines = splitAligned(unit.items.map((i) => i.text), translatedText);
       this._applying = true;
       try {
-        if (mode === 'bilingual') {
-          this._insertBilingual(unit, lines);
-        } else {
-          unit.items.forEach((item, i) => {
-            const value = lines[i] != null ? lines[i] : '';
-            this._writeNode(item, value, mode === 'hide');
-          });
-        }
+        if (unit.kind === 'frag') this._applyFragment(unit.el, translatedText);
+        else this._applyText(unit, translatedText, mode);
       } catch (err) {
         console.warn('[MiriTranslator] apply failed', err);
       } finally {
         this._applying = false;
       }
+    }
+
+    _applyText(unit, translatedText, mode) {
+      const lines = splitAligned(unit.items.map((i) => i.text), translatedText);
+      if (mode === 'bilingual') {
+        this._insertBilingual(unit, lines);
+        return;
+      }
+      unit.items.forEach((item, i) => {
+        this._writeNode(item, lines[i] != null ? lines[i] : '', mode === 'hide');
+      });
+    }
+
+    /** Replace a per-character container with one plain text node. */
+    _applyFragment(el, translatedText) {
+      const rec = this.fragments.get(el) || { html: el.innerHTML, applied: null };
+      if (rec.html == null) rec.html = el.innerHTML;
+      this.fragments.set(el, rec);
+      el.textContent = typeof translatedText === 'string' ? translatedText : String(translatedText || '');
+      rec.applied = el.textContent;
     }
 
     _writeNode(item, translated, hideOriginal) {
@@ -275,7 +398,10 @@
     startObserving() {
       if (this.observer || !document.body) return;
       this.observer = new MutationObserver((records) => {
-        if (this._applying || !this.nodes.size) return;
+        if (this._applying || !this.isTranslated) return;
+        // Drop references the page has already discarded before scheduling —
+        // SPAs rebuild their DOM constantly, so this is what keeps the map bounded.
+        this.prune();
         for (const rec of records) {
           const el = rec.target.nodeType === 1 ? rec.target : rec.target.parentElement;
           if (el && el.closest && el.closest('[data-mt]')) continue;
@@ -302,11 +428,13 @@
       if (this._timer) return;
       this._timer = setTimeout(async () => {
         this._timer = null;
-        if (this.active || !this.nodes.size) return;
+        if (this.active || !this.isTranslated) return;
+        this.prune();
         const units = this.collect(document.body);
         if (!units.length) return;
         const s = store.get();
         for (const unit of units) {
+          if (unit.kind === 'frag') continue;
           for (const item of unit.items) {
             if (!this.nodes.has(item.node)) {
               this.nodes.set(item.node, {

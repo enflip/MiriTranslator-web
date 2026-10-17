@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Per-character DOM</title>
+<style>
+  body { font: 15px/1.8 -apple-system, system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 24px 20px 80px; }
+  /* Cosense/scrapbox wraps every character in its own span. */
+  .line { margin: 0 0 2px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const LINES = [
+  'Guidelines for derivative works',
+  'These notes describe when it is acceptable to reuse the published material.',
+  'Everything below is released under the same licence as the original.',
+  'You must credit the original author and link back to the source page.',
+  'Images referenced by relative path break after the file is downloaded.',
+  'If you are unsure whether a use is permitted, please ask first.',
+];
+const app = document.getElementById('app');
+for (const text of LINES) {
+  const line = document.createElement('div');
+  line.className = 'line';
+  // one <span class="char-index"> per character — exactly what scrapbox does
+  [...text].forEach((ch, i) => {
+    const span = document.createElement('span');
+    span.className = 'char-index c-' + i;
+    span.textContent = ch;
+    line.appendChild(span);
+  });
+  app.appendChild(line);
+}
+window.__charSpans = document.querySelectorAll('.char-index').length;
+</script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cosense-like SPA — late render + re-render</title>
+<style>
+  body { font: 15px/1.8 -apple-system, system-ui, sans-serif; margin: 0; color: #24292f; background: #fff; }
+  #app { max-width: 780px; margin: 0 auto; padding: 24px 20px 80px; }
+  .line { padding: 2px 0; min-height: 1.8em; }
+  .head { font-weight: 700; font-size: 20px; margin: 18px 0 8px; }
+  .code { font-family: ui-monospace, monospace; background: #f6f8fa; padding: 8px 10px; border-radius: 6px; }
+  #boot { color: #888; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<!-- Mirrors how scrapbox.io / Notion-style apps behave:
+     1. the shell paints immediately, the text arrives much later
+     2. the editor periodically re-creates its DOM subtree            -->
+<div id="app">
+  <p id="boot">Loading…</p>
+</div>
+
+<script>
+const LINES = [
+  ['head', 'Guidelines for derivative works'],
+  ['line', 'These notes describe when it is acceptable to reuse the material published on this page.'],
+  ['line', 'Everything below is released under the same licence as the original document unless stated otherwise.'],
+  ['head', 'Attribution'],
+  ['line', 'You must credit the original author. A link back to the source page is strongly recommended.'],
+  ['line', 'If you modify the text, indicate that changes were made. Do not imply that the author endorses your version.'],
+  ['head', 'Technical constraints'],
+  ['line', 'The export tool produces plain text. Formatting such as tables and footnotes is lost during conversion.'],
+  ['line', 'Images referenced by relative path break once the file is downloaded to a different directory.'],
+  ['code', 'export --format plain --include-notes=false project.json'],
+  ['head', 'What is not covered'],
+  ['line', 'Trademarked names and logos are excluded from the grant even when they appear in the body text.'],
+  ['line', 'Private correspondence linked from a page is not part of the published work.'],
+  ['line', 'If you are unsure whether a use is permitted, ask before you publish.'],
+];
+
+let generation = 0;
+
+function render(reuse) {
+  const app = document.getElementById('app');
+  const boot = document.getElementById('boot');
+  if (boot) boot.remove();
+  // A real SPA replaces its subtree wholesale on re-render.
+  if (reuse) app.textContent = '';
+  else app.innerHTML = '';
+  for (const [kind, text] of LINES) {
+    const el = document.createElement(kind === 'head' ? 'h2' : kind === 'code' ? 'pre' : 'div');
+    if (kind === 'head') el.className = 'head';
+    if (kind === 'code') el.className = 'code';
+    el.textContent = text;
+    app.appendChild(el);
+  }
+  generation += 1;
+  window.__spaGeneration = generation;
+}
+
+// 1. Late first paint — the whole point of an SPA.
+setTimeout(() => render(false), 1200);
+
+// 2. Periodic full re-render, like an editor syncing state.
+setTimeout(() => render(true), 6000);
+setTimeout(() => render(true), 11000);
+</script>
+
+</body>
+</html>

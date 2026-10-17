@@ -55,6 +55,21 @@ async function proxy(req, res, target) {
 }
 
 createServer(async (req, res) => {
+  const cors = {
+    'Access-Control-Allow-Origin': '*',
+    // Required so a public page (e.g. scrapbox.io) may reach localhost during
+    // Chrome's Private Network Access preflight.
+    'Access-Control-Allow-Private-Network': 'true',
+    'Access-Control-Allow-Headers': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  };
+
+  // Let the harness run inside a real third-party page (SPA testing).
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, cors);
+    return res.end();
+  }
+
   try {
     const url = new URL(req.url, `http://localhost:${port}`);
     if (url.pathname === '/__proxy') return proxy(req, res, url.searchParams.get('url'));
@@ -64,13 +79,13 @@ createServer(async (req, res) => {
     if (!info || info.isDirectory()) path = join(path, 'index.html');
     const body = await readFile(path);
     res.writeHead(200, {
+      ...cors,
       'Content-Type': TYPES[extname(path)] || 'application/octet-stream',
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*',
     });
     res.end(body);
   } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.writeHead(404, { ...cors, 'Content-Type': 'text/plain' });
     res.end('404');
   }
 }).listen(port, () => console.log(`serving ${root} on http://localhost:${port}/test/harness.html`));

@@ -527,6 +527,9 @@
 // ==========================================================================
   // 40 — Translation engines
 //
+// Every engine here works **without an API key**, so there is nothing to
+// configure and nothing to leak: pick one, or let the scheduler pick for you.
+//
 // Every engine exposes:
 //   id, label, sub, keyless, color
 //   maxChars        max characters per HTTP request
@@ -534,12 +537,10 @@
 //   concurrency     parallel requests this engine may open
 //   mapLang(code)   canonical code -> engine code (null when unsupported)
 //   supports(code)  does this engine handle the code as a target?
-//   translate(texts, sl, tl, {signal, key, extra}) -> Promise<string[]>
+//   translate(texts, sl, tl, {signal}) -> Promise<string[]>
 // ==========================================================================
 
   const setOf = (arr) => new Set(arr);
-
-  const ALL_CODES = () => setOf(LANGS.keys());
 
   const PAPAGO_CODES = setOf([
     'ko', 'en', 'ja', 'zh-CN', 'zh-TW', 'vi', 'th', 'id', 'fr', 'de', 'es', 'it', 'ru', 'pt',
@@ -601,7 +602,7 @@
   const ENGINE_GOOGLE = {
     id: 'google',
     label: 'Google 번역',
-    sub: '무료 · 키 불필요',
+    sub: '키 불필요 · 가장 빠름 · 언어 100개 이상',
     keyless: true,
     color: '#4285f4',
     maxChars: 4500,
@@ -647,7 +648,7 @@
   const ENGINE_PAPAGO = {
     id: 'papago',
     label: '파파고',
-    sub: '무료 · 키 불필요 · 한국어 최적',
+    sub: '키 불필요 · 한국어 최적',
     keyless: true,
     color: '#08cf5d',
     maxChars: 4500,
@@ -714,7 +715,7 @@
   const ENGINE_DEEPL_WEB = {
     id: 'deepl-web',
     label: 'DeepL',
-    sub: '무료 · 키 불필요 · 고품질',
+    sub: '키 불필요 · 고품질',
     keyless: true,
     color: '#0f2b46',
     maxChars: 4000,
@@ -789,200 +790,16 @@
     },
   };
 
-  // ------------------------------------------------------- DeepL API Free
-  const ENGINE_DEEPL_API = {
-    id: 'deepl-api',
-    label: 'DeepL API (Free)',
-    sub: '공식 API · 월 50만자 무료',
-    keyless: false,
-    color: '#0f2b46',
-    maxChars: 4800,
-    minInterval: 150,
-    concurrency: 3,
-    keys: [
-      { key: 'deeplKey', label: 'DeepL Auth Key', placeholder: 'xxxxxxxx-xxxx-…:fx', type: 'password' },
-    ],
-    mapLang: (code) => {
-      if (code === AUTO) return AUTO;
-      if (code === 'zh-CN' || code === 'zh-TW') return 'ZH';
-      return DEEPL_CODES.has(code) ? code.toUpperCase() : null;
-    },
-    supports: (code) => ENGINE_DEEPL_API.mapLang(code) !== null,
-    baseUrl(key) {
-      return /:fx/.test(String(key || ''))
-        ? 'https://api-free.deepl.com/v2/translate'
-        : 'https://api.deepl.com/v2/translate';
-    },
-    async translate(texts, sl, tl, { signal, key } = {}) {
-      const target = this.mapLang(tl);
-      if (!target) throw new Error(`DeepL은 '${tl}'를 지원하지 않습니다`);
-      const source = sl === AUTO ? '' : this.mapLang(sl) || '';
-      const groups = packTexts(texts, this.maxChars);
-      await respectRateLimit(this.id, this.minInterval);
-      const results = await runPool(
-        groups.map((group) => async () => {
-          const res = await retry(
-            () =>
-              http({
-                method: 'POST',
-                url: this.baseUrl(key),
-                headers: { Authorization: `DeepL-Auth-Key ${key}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify(
-                  group.map((t) => (source ? { text: t, source_lang: source } : { text: t })),
-                ),
-                responseType: 'json',
-                signal,
-                timeout: 25000,
-              }),
-            { shouldRetry: (e) => !!(e && e.retriable) },
-          );
-          const json = res.json;
-          if (!json || !json.translations) {
-            const msg = (json && json.message) || 'DeepL API 응답 오류';
-            throw new HttpError(msg, { status: res.status, fatal: res.status === 401 || res.status === 403 });
-          }
-          return json.translations.map((t) => t.text);
-        }),
-        this.concurrency,
-        signal,
-      );
-      return results.flat();
-    },
-  };
-
-  // ------------------------------------------------------------ Microsoft
-  const ENGINE_MICROSOFT = {
-    id: 'microsoft',
-    label: 'Microsoft 번역',
-    sub: '공식 API · 월 200만자 무료',
-    keyless: false,
-    color: '#0078d4',
-    maxChars: 4000,
-    minInterval: 120,
-    concurrency: 3,
-    keys: [
-      { key: 'msKey', label: 'Subscription Key', placeholder: 'xxxxxxxxxxxxxxxx', type: 'password' },
-      { key: 'msRegion', label: 'Region (비우면 global)', placeholder: 'global', type: 'text', optional: true },
-    ],
-    mapLang: (code) => {
-      if (code === AUTO) return AUTO;
-      if (code === 'zh-CN') return 'zh-Hans';
-      if (code === 'zh-TW') return 'zh-Hant';
-      return LANGS.has(code) ? code : null;
-    },
-    supports: (code) => ENGINE_MICROSOFT.mapLang(code) !== null,
-    async translate(texts, sl, tl, { signal, key, extra } = {}) {
-      const target = this.mapLang(tl);
-      if (!target) throw new Error(`Microsoft는 '${tl}'를 지원하지 않습니다`);
-      const source = sl === AUTO ? '' : this.mapLang(sl) || '';
-      const region = (extra && extra.msRegion && extra.msRegion.trim()) || 'global';
-      const qs =
-        `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=${encodeURIComponent(target)}` +
-        (source ? `&from=${encodeURIComponent(source)}` : '');
-      await respectRateLimit(this.id, this.minInterval);
-      const results = await runPool(
-        texts.map((text) => async () => {
-          const res = await retry(
-            () =>
-              http({
-                method: 'POST',
-                url: qs,
-                headers: {
-                  'Ocp-Apim-Subscription-Key': key,
-                  'Ocp-Apim-Subscription-Region': region,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify([{ Text: text }]),
-                responseType: 'json',
-                signal,
-                timeout: 25000,
-              }),
-            { shouldRetry: (e) => !!(e && e.retriable) },
-          );
-          const json = res.json;
-          if (!Array.isArray(json) || !json[0] || !json[0].translations) {
-            const msg = (json && (json.error ? JSON.stringify(json.error) : json.message)) || 'Microsoft 응답 오류';
-            throw new HttpError(`Microsoft: ${msg}`, {
-              status: res.status,
-              fatal: res.status === 401 || res.status === 403,
-            });
-          }
-          return json[0].translations.map((t) => t.text).join('');
-        }),
-        this.concurrency,
-        signal,
-      );
-      return results;
-    },
-  };
-
-  // ---------------------------------------------------- Papago N2MT Cloud
-  const ENGINE_PAPAGO_CLOUD = {
-    id: 'papago-cloud',
-    label: 'Papago N2MT (Naver Cloud)',
-    sub: '공식 API · 월 100만자 무료',
-    keyless: false,
-    color: '#08cf5d',
-    maxChars: 4500,
-    minInterval: 120,
-    concurrency: 3,
-    keys: [
-      { key: 'naverId', label: 'Client ID', placeholder: 'xxxxxxxxxxxxxxxx', type: 'text' },
-      { key: 'naverKey', label: 'Client Secret', placeholder: 'xxxxxxxxxxxxxxxx', type: 'password' },
-    ],
-    mapLang: (code) => (code === AUTO ? AUTO : PAPAGO_CODES.has(code) ? code : null),
-    supports: (code) => ENGINE_PAPAGO_CLOUD.mapLang(code) !== null,
-    async translate(texts, sl, tl, { signal, key, extra } = {}) {
-      const target = this.mapLang(tl);
-      if (!target) throw new Error(`Papago N2MT는 '${tl}'를 지원하지 않습니다`);
-      const source = sl === AUTO ? AUTO : this.mapLang(sl) || AUTO;
-      await respectRateLimit(this.id, this.minInterval);
-      const results = await runPool(
-        texts.map((text) => async () => {
-          const res = await retry(
-            () =>
-              http({
-                method: 'POST',
-                url: 'https://openapi.naver.com/v1/nmt/nmt',
-                headers: {
-                  'X-Naver-Client-Id': key,
-                  'X-Naver-Client-Secret': extra && extra.naverKey ? extra.naverKey : '',
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ source, target, text }),
-                responseType: 'json',
-                signal,
-                timeout: 25000,
-              }),
-            { shouldRetry: (e) => !!(e && e.retriable) },
-          );
-          const json = res.json;
-          const result = json && json.message && json.message.result;
-          if (!result || typeof result.translatedText !== 'string') {
-            const msg =
-              (json && json.message && json.message.error && json.message.error.message) || 'Naver 응답 오류';
-            throw new HttpError(msg, { status: res.status, fatal: res.status === 401 || res.status === 403 });
-          }
-          return result.translatedText;
-        }),
-        this.concurrency,
-        signal,
-      );
-      return results;
-    },
-  };
-
-  // ----------------------------------------------------- MyMemory (free)
+  // ------------------------------------------------------------- MyMemory
   const ENGINE_MYMEMORY = {
     id: 'mymemory',
     label: 'MyMemory',
-    sub: '무료 · 키 불필요 · 백업용',
+    sub: '키 불필요 · 백업용',
     keyless: true,
     color: '#2e7d32',
     maxChars: 490,
     minInterval: 200,
     concurrency: 2,
-    keys: [{ key: 'mymemory', label: '이메일 (선택 · 사용량 증가)', placeholder: 'you@example.com', type: 'text', optional: true }],
     mapLang: (code) => (code === AUTO ? AUTO : LANGS.has(code) ? code.split('-')[0] : null),
     supports: (code) => LANGS.has(code),
     decode(text) {
@@ -998,15 +815,13 @@
       const source = this.mapLang(sl) || 'en';
       const target = this.mapLang(tl);
       if (!target) throw new Error(`MyMemory는 '${tl}'를 지원하지 않습니다`);
-      const email = String((store.get().keys || {}).mymemory || '').trim();
       await respectRateLimit(this.id, this.minInterval);
       const results = await runPool(
         texts.map((text) => async () => {
           const url =
             'https://api.mymemory.translated.net/get?q=' +
             encodeURIComponent(text) +
-            `&langpair=${encodeURIComponent(source)}|${encodeURIComponent(target)}` +
-            (email ? `&de=${encodeURIComponent(email)}` : '');
+            `&langpair=${encodeURIComponent(source)}|${encodeURIComponent(target)}`;
           const res = await retry(
             () => http({ url, responseType: 'json', signal, timeout: 20000 }),
             { shouldRetry: (e) => !!(e && (e.retriable || e.status === 403)) },
@@ -1034,7 +849,7 @@
   const ENGINE_REVERSO = {
     id: 'reverso',
     label: 'Reverso',
-    sub: '무료 · 키 불필요 · 백업용',
+    sub: '키 불필요 · 백업용',
     keyless: true,
     color: '#1f6feb',
     maxChars: 700,
@@ -1090,199 +905,20 @@
     },
   };
 
-  // -------------------------------------------------- Google Cloud (v2)
-  const ENGINE_GCLOUD = {
-    id: 'gcloud',
-    label: 'Google Cloud 번역',
-    sub: '공식 API · 월 50만자 무료',
-    keyless: false,
-    color: '#4285f4',
-    maxChars: 4500,
-    minInterval: 120,
-    concurrency: 3,
-    keys: [{ key: 'gcloudKey', label: 'API Key', placeholder: 'AIza…', type: 'password' }],
-    mapLang: (code) => (code === AUTO ? AUTO : LANGS.has(code) ? code : null),
-    supports: (code) => LANGS.has(code),
-    async translate(texts, sl, tl, { signal, key } = {}) {
-      const groups = packTexts(texts, this.maxChars);
-      await respectRateLimit(this.id, this.minInterval);
-      const results = await runPool(
-        groups.map((group) => async () => {
-          const payload = { q: group, target: tl, format: 'text' };
-          if (sl !== AUTO) payload.source = sl;
-          const res = await retry(
-            () =>
-              http({
-                method: 'POST',
-                url: `https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(key)}`,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                responseType: 'json',
-                signal,
-                timeout: 25000,
-              }),
-            { shouldRetry: (e) => !!(e && e.retriable) },
-          );
-          const json = res.json;
-          const list = json && json.data && json.data.translations;
-          if (!Array.isArray(list)) {
-            const msg = (json && json.error && json.error.message) || 'Google Cloud 응답 오류';
-            throw new HttpError(msg, { status: res.status, fatal: res.status === 400 || res.status === 403 });
-          }
-          return list.map((t) =>
-            String(t.translatedText).replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'),
-          );
-        }),
-        this.concurrency,
-        signal,
-      );
-      return results.flat();
-    },
-  };
-
-  // ------------------------------------------------------- LibreTranslate
-  const ENGINE_LIBRE = {
-    id: 'libre',
-    label: 'LibreTranslate',
-    sub: '직접 호스팅 · 공개 인스턴스',
-    keyless: false,
-    needsUrl: true,
-    color: '#6b4fbb',
-    maxChars: 4000,
-    minInterval: 200,
-    concurrency: 2,
-    keys: [
-      { key: 'libreUrl', label: '인스턴스 주소', placeholder: 'https://libretranslate.com', type: 'text', default: 'https://libretranslate.com' },
-      { key: 'libreKey', label: 'API Key (선택)', placeholder: '없으면 비워두세요', type: 'password', optional: true },
-    ],
-    mapLang: (code) => (code === AUTO ? AUTO : LANGS.has(code) ? code.split('-')[0] : null),
-    supports: (code) => LANGS.has(code),
-    async translate(texts, sl, tl, { signal, extra } = {}) {
-      const base = String((extra && extra.libreUrl) || 'https://libretranslate.com').replace(/\/+$/, '');
-      const apiKey = (extra && extra.libreKey) || '';
-      await respectRateLimit(this.id, this.minInterval);
-      const results = await runPool(
-        texts.map((text) => async () => {
-          const payload = { q: text, target: this.mapLang(tl), format: 'text' };
-          if (sl !== AUTO) payload.source = this.mapLang(sl);
-          if (apiKey) payload.api_key = apiKey;
-          const res = await retry(
-            () =>
-              http({
-                method: 'POST',
-                url: `${base}/translate`,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                responseType: 'json',
-                signal,
-                timeout: 25000,
-              }),
-            { shouldRetry: (e) => !!(e && e.retriable) },
-          );
-          const json = res.json;
-          if (!json || typeof json.translatedText !== 'string') {
-            throw new HttpError((json && json.error) || 'LibreTranslate 응답 오류', {
-              status: res.status,
-              fatal: res.status === 403,
-            });
-          }
-          return json.translatedText;
-        }),
-        this.concurrency,
-        signal,
-      );
-      return results;
-    },
-  };
-
-  // ------------------------------------------------------ Custom endpoint
-  const ENGINE_CUSTOM = {
-    id: 'custom',
-    label: '사용자 정의 엔드포인트',
-    sub: '임의의 JSON API',
-    keyless: false,
-    needsUrl: true,
-    color: '#5f6368',
-    maxChars: 4000,
-    minInterval: 150,
-    concurrency: 2,
-    keys: [
-      { key: 'customUrl', label: '요청 URL', placeholder: 'https://example.com/translate', type: 'text' },
-      { key: 'customTextField', label: '본문 텍스트 필드명', placeholder: 'q', type: 'text', default: 'q' },
-      { key: 'customRespField', label: '응답 필드 경로', placeholder: 'translatedText (a.b 중첩 가능)', type: 'text', default: 'translatedText' },
-    ],
-    mapLang: (code) => (code === AUTO ? AUTO : LANGS.has(code) ? code : null),
-    supports: () => true,
-    async translate(texts, sl, tl, { signal, extra } = {}) {
-      const cfg = extra || {};
-      const url = String(cfg.customUrl || '').trim();
-      if (!url) throw new Error('요청 URL을 입력하세요');
-      const textField = (cfg.customTextField || 'q').trim() || 'q';
-      const respPath = (cfg.customRespField || 'translatedText').trim() || 'translatedText';
-      const pick = (obj) => respPath.split('.').reduce((acc, part) => (acc == null ? acc : acc[part]), obj);
-      await respectRateLimit(this.id, this.minInterval);
-      const results = await runPool(
-        texts.map((text) => async () => {
-          const payload = {
-            [textField]: text,
-            source: sl,
-            target: tl,
-            from: sl,
-            to: tl,
-            lang: `${sl}-${tl}`,
-          };
-          const res = await retry(
-            () =>
-              http({
-                method: 'POST',
-                url,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                responseType: 'json',
-                signal,
-                timeout: 25000,
-              }),
-            { shouldRetry: (e) => !!(e && e.retriable) },
-          );
-          let value = pick(res.json);
-          if (Array.isArray(value)) value = value.join('\n');
-          if (typeof value !== 'string' || !value) {
-            throw new HttpError('사용자 정의 엔드포인트 응답에서 텍스트를 찾지 못했습니다', {
-              status: res.status,
-            });
-          }
-          return value;
-        }),
-        this.concurrency,
-        signal,
-      );
-      return results;
-    },
-  };
-
+  /** Default order used by the automatic scheduler — best first. */
   const ENGINES = [
     ENGINE_GOOGLE,
     ENGINE_PAPAGO,
     ENGINE_DEEPL_WEB,
-    ENGINE_DEEPL_API,
-    ENGINE_MICROSOFT,
-    ENGINE_PAPAGO_CLOUD,
     ENGINE_MYMEMORY,
     ENGINE_REVERSO,
-    ENGINE_GCLOUD,
-    ENGINE_LIBRE,
-    ENGINE_CUSTOM,
   ];
 
   const ENGINE_BY_ID = new Map(ENGINES.map((e) => [e.id, e]));
 
-  /** True when every mandatory key slot for this engine is filled in. */
-  function engineUsable(engine) {
-    if (engine.keyless) return true;
-    const values = (engine.keys || [])
-      .filter((k) => !k.optional && !(k.default && store.get().keys[k.key]))
-      .map((k) => store.get().keys[k.key]);
-    return values.every((v) => typeof v === 'string' && v.trim().length > 0);
+  /** Every shipped engine is keyless, so nothing ever needs configuring. */
+  function engineUsable() {
+    return true;
   }
 
 /* ==== src/50-store.js =============================================== */
@@ -1300,7 +936,7 @@
     /** Selected engine id, or 'auto' to let the scheduler choose. */
     engineId: 'auto',
     /** Fallback order used when engineId === 'auto'. */
-    priority: ['google', 'papago', 'deepl-web', 'deepl-api', 'microsoft', 'papago-cloud', 'gcloud', 'mymemory', 'reverso', 'libre', 'custom'],
+    priority: ['google', 'papago', 'deepl-web', 'mymemory', 'reverso'],
     /** replace | bilingual | hide */
     mode: 'replace',
     /** Translate every matching page without asking. */
@@ -1309,8 +945,8 @@
     autoSites: [],
     /** Sites never translated. */
     neverSites: [],
-    /** Floating button visibility. */
-    showFab: true,
+    /** Floating button visibility — off by default; the shortcut opens the popup. */
+    showFab: false,
     /** auto | light | dark */
     theme: 'auto',
     /** Selection bubble. */
@@ -1323,8 +959,6 @@
     ignoreSelectors: '',
     /** Global request cap across all engines. */
     concurrency: 6,
-    /** Read API keys from the store instead of prompting. */
-    keys: {},
     /** Show a toast when the page is already in the target language. */
     skipSameLanguage: true,
     /** Remember the last page's language detection in memory. */
@@ -1355,15 +989,13 @@
 
   /** Deep merge stored values over the defaults. */
   function mergeDefaults(stored) {
-    const out = { ...DEFAULT_SETTINGS, keys: {} };
+    const out = { ...DEFAULT_SETTINGS };
     if (!stored || typeof stored !== 'object') return out;
     for (const [key, value] of Object.entries(stored)) {
-      if (key === 'keys') {
-        out.keys = { ...(stored.keys || {}) };
-      } else if (key in DEFAULT_SETTINGS) {
-        out[key] = value;
-      }
+      if (key in DEFAULT_SETTINGS) out[key] = value;
     }
+    // Drop engines that no longer ship, so an old config cannot break selection.
+    if (Array.isArray(out.priority)) out.priority = out.priority.filter((id) => ENGINE_BY_ID.has(id));
     return out;
   }
 
@@ -1373,17 +1005,13 @@
 
   const store = {
     get: () => state,
-    /** Shallow patch (nested objects are merged). */
+    /** Shallow patch. */
     set(patch) {
       const next = { ...state, ...patch };
-      if (patch.keys) next.keys = { ...state.keys, ...patch.keys };
       state = mergeDefaults(next);
       writeRaw(state);
       storeEvents.emit('change', state);
       return state;
-    },
-    setKey(key, value) {
-      return store.set({ keys: { [key]: value } });
     },
     reset() {
       state = mergeDefaults(null);
@@ -1422,16 +1050,24 @@
   }
 
 /* ==== src/60-dom.js ================================================= */
-/** Instance reference so the service layer can reach the active translator. */
+﻿/** Instance reference so the service layer can reach the active translator. */
   const translatorRef = { current: null };
 
   // ==========================================================================
   // 60 — DOM translation engine
   //
-  // Text nodes are grouped by their nearest *block-level* ancestor so that a
-  // paragraph (or a sentence spread across inline tags) becomes one translation
-  // unit. Units are joined with "\n" — every engine we ship preserves line
-  // breaks, which lets us map the response back onto the individual nodes.
+  // Two shapes of source have to be handled:
+  //
+  //  1. Ordinary pages. Text nodes are grouped by their nearest block-level
+  //     ancestor, so a paragraph (or a sentence spread across inline tags)
+  //     becomes one translation unit. Units are joined with "\n" — every engine
+  //     preserves line breaks, which lets us map the response back onto the
+  //     individual nodes.
+  //
+  //  2. Character-split editors (Cosense/scrapbox, some search UIs, a11y
+  //     widgets) wrap *every single character* in its own <span>. Those one-char
+  //     nodes are useless on their own, so a parent that is made mostly of tiny
+  //     nodes is collapsed into one unit and replaced wholesale.
   // ==========================================================================
 
   const SKIP_TAGS = new Set([
@@ -1455,6 +1091,16 @@
     'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HGROUP', 'HR', 'LI', 'MAIN', 'NAV',
     'OL', 'P', 'SECTION', 'TABLE', 'TBODY', 'TD', 'TFOOT', 'TH', 'THEAD', 'TR', 'UL',
   ]);
+
+  /** Elements a per-character container is allowed to hold. */
+  const INLINE_TAGS = new Set(['SPAN', 'B', 'I', 'EM', 'STRONG', 'U', 'S', 'SUB', 'SUP', 'BR', 'A', 'SMALL']);
+
+  // Cosense/scrapbox emits one <span class="char-index"> per character, so a
+  // real line is 60+ nodes of exactly one character each. We collapse such a
+  // container into a single translatable unit instead of trying to translate
+  // one-character fragments (which never survive the round trip).
+  const FRAGMENT_MIN_NODES = 4;
+  const FRAGMENT_MAX_NODE = 2;
 
   /** Nearest block-level ancestor, or null when we reach <body>/<html>. */
   function blockAnchor(node) {
@@ -1486,12 +1132,45 @@
   const leadingWs = (s) => (s.match(/^\s*/) || [''])[0];
   const trailingWs = (s) => (s.match(/\s*$/) || [''])[0];
 
+  /**
+   * Is this element a per-character container? True only when every piece of
+   * text inside it is a tiny node and nothing but inline elements is inside, so
+   * ordinary markup like `<p>See <a>docs</a></p>` is never mistaken for one.
+   */
+  function isFragmentContainer(el) {
+    if (!el || SKIP_TAGS.has(el.tagName)) return false;
+    if (el.hasAttribute && el.hasAttribute('data-mt')) return false;
+    let nodes = 0;
+    for (const child of el.childNodes) {
+      if (child.nodeType === 3) {
+        const v = child.nodeValue.trim();
+        if (!v) continue;
+        if (v.length > FRAGMENT_MAX_NODE) return false;
+        nodes += 1;
+      } else if (child.nodeType === 1) {
+        if (!INLINE_TAGS.has(child.tagName)) return false;
+        const text = (child.textContent || '').trim();
+        if (text.length > FRAGMENT_MAX_NODE) return false;
+        if (text) nodes += 1;
+      }
+    }
+    return nodes >= FRAGMENT_MIN_NODES;
+  }
+
   class PageTranslator {
     constructor() {
       /** @type {Map<Text, {original:string, applied:string|null, originalSpan?:Element}>} */
       this.nodes = new Map();
+      /** Collapsed containers: element -> {html, applied}. */
+      this.fragments = new Map();
       /** Elements we inserted, removed again on revert. */
       this.inserted = new Set();
+      /**
+       * Whether the page is currently translated. Deliberately NOT derived from
+       * the maps: pruning drops every entry of a page that re-rendered itself,
+       * and the observer must keep following it even with nothing tracked yet.
+       */
+      this.enabled = false;
       this.active = false;
       this.observer = null;
       this._applying = false;
@@ -1499,7 +1178,7 @@
     }
 
     get isTranslated() {
-      return this.nodes.size > 0;
+      return this.enabled;
     }
 
     buildSelector() {
@@ -1511,15 +1190,50 @@
       return parts.join(', ');
     }
 
+    /** Drop references to nodes the page has already discarded (SPAs). */
+    prune() {
+      let dropped = 0;
+      for (const [node] of this.nodes) {
+        if (!node.isConnected) {
+          this.nodes.delete(node);
+          dropped += 1;
+        }
+      }
+      for (const [el] of this.fragments) {
+        if (!el.isConnected) {
+          this.fragments.delete(el);
+          dropped += 1;
+        }
+      }
+      return dropped;
+    }
+
     /**
      * Collect translation units under `root`.
-     * @returns {Array<{anchor:Element, items:Array, text:string}>}
+     * @returns {Array<{kind:string, anchor:Element, items:Array, text:string}>}
      */
     collect(root = document.body) {
       const skipSelector = this.buildSelector();
       const minLen = Math.max(0, store.get().minNodeLength | 0);
+      /** @type {Map<Element, {anchor:Element, items:Array}>} */
       const groups = new Map();
 
+      // --- Pass 1: locate per-character containers (Cosense/scrapbox & co). ---
+      const fragmentRoots = new Set();
+      const elementWalker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+        acceptNode: (candidate) =>
+          fragmentRoots.has(candidate.parentElement || candidate)
+            ? NodeFilter.FILTER_REJECT
+            : NodeFilter.FILTER_ACCEPT,
+      });
+      let el;
+      while ((el = elementWalker.nextNode())) {
+        if (!el.textContent || !el.textContent.trim()) continue;
+        if (!isFragmentContainer(el)) continue;
+        fragmentRoots.add(el);
+      }
+
+      // --- Pass 2: walk text nodes, skipping anything inside a fragment root. ---
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
         acceptNode(node) {
           const parent = node.parentElement;
@@ -1539,33 +1253,53 @@
         },
       });
 
-      const groupsMap = groups;
-      let current;
-      while ((current = walker.nextNode())) {
-        if (this.nodes.has(current)) continue; // already processed
-        if (!current.isConnected) continue;
-        const anchor = blockAnchor(current);
-        if (!anchor) continue;
-        const raw = current.nodeValue;
+      let node;
+      while ((node = walker.nextNode())) {
+        if (this.nodes.has(node) || !node.isConnected) continue;
+        const parent = node.parentElement;
+        const raw = node.nodeValue;
         const core = raw.trim();
         if (!core) continue;
-        if (!groupsMap.has(anchor)) groupsMap.set(anchor, { anchor, items: [] });
-        groupsMap.get(anchor).items.push({
-          node: current,
+
+        let insideFragment = false;
+        for (let up = parent; up && up !== root; up = up.parentElement) {
+          if (fragmentRoots.has(up)) {
+            insideFragment = true;
+            break;
+          }
+        }
+        if (insideFragment) continue;
+
+        const anchor = blockAnchor(node);
+        if (!anchor) continue;
+        if (!groups.has(anchor)) groups.set(anchor, { anchor, items: [] });
+        groups.get(anchor).items.push({
+          node,
           text: core,
           lead: leadingWs(raw),
           tail: trailingWs(raw),
         });
       }
 
-      // Split oversized groups so no single request exceeds ~2500 characters.
       const units = [];
-      for (const group of groupsMap.values()) {
+
+      // --- Pass 3: one unit per fragment container, whole line in, whole line out. ---
+      for (const fragEl of fragmentRoots) {
+        if (!fragEl.isConnected || this.fragments.has(fragEl)) continue;
+        const text = (fragEl.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!hasWords(text)) continue;
+        this.fragments.set(fragEl, { html: fragEl.innerHTML, applied: null });
+        units.push({ kind: 'frag', anchor: fragEl, el: fragEl, text });
+      }
+
+      // --- Pass 4: split oversized groups so no request exceeds ~2500 characters. ---
+      for (const group of groups.values()) {
         let chunkItems = [];
         let chunkLen = 0;
         const flush = () => {
           if (!chunkItems.length) return;
           units.push({
+            kind: 'text',
             anchor: group.anchor,
             items: chunkItems,
             text: chunkItems.map((it) => it.text).join('\n'),
@@ -1583,25 +1317,23 @@
       return units;
     }
 
+
     /**
      * Translate every unit under the page.
      * @param {{source:string, target:string, engineId?:string, mode?:string, signal?:AbortSignal}} opts
-     * @param {(info:{done:number,total:number})=>void} onProgress
      */
-    async translate(opts, onProgress) {
+    async translate(opts) {
       if (this.active) return;
+      this.prune();
       const units = this.collect(opts.root || document.body);
-      if (!units.length) {
-        if (onProgress) onProgress({ done: 0, total: 0 });
-        return;
-      }
+      if (!units.length) return;
       this.active = true;
       const controller = new AbortController();
       const signal = opts.signal || controller.signal;
 
       // Register originals up-front so the observer (and a re-run) skip them.
-      // The *raw* node value is kept so a revert restores the byte-exact page.
       for (const unit of units) {
+        if (unit.kind === 'frag') continue;
         for (const item of unit.items) {
           if (!this.nodes.has(item.node)) {
             this.nodes.set(item.node, {
@@ -1616,6 +1348,7 @@
       const mode = opts.mode || store.get().mode;
       try {
         await service.translateUnits(units, { ...opts, signal, mode });
+        this.enabled = true;
       } finally {
         this.active = false;
         this._applying = false;
@@ -1625,6 +1358,7 @@
     /** Restore every node we touched and remove everything we inserted. */
     revert() {
       this.stopObserving();
+      this.enabled = false;
       for (const [node, rec] of Array.from(this.nodes)) {
         if (rec.originalSpan && rec.originalSpan.parentNode) {
           rec.originalSpan.replaceWith(document.createTextNode(rec.original));
@@ -1632,32 +1366,49 @@
           node.nodeValue = rec.original;
         }
       }
+      for (const [el, rec] of Array.from(this.fragments)) {
+        if (el.isConnected && rec.html != null) el.innerHTML = rec.html;
+      }
       for (const el of Array.from(this.inserted)) {
         if (el.parentNode) el.remove();
       }
       this.inserted.clear();
       this.nodes.clear();
+      this.fragments.clear();
       service.clearCache();
     }
 
     // -------------------------------------------------------------- apply
     applyUnit(unit, translatedText, mode) {
-      const lines = splitAligned(unit.items.map((i) => i.text), translatedText);
       this._applying = true;
       try {
-        if (mode === 'bilingual') {
-          this._insertBilingual(unit, lines);
-        } else {
-          unit.items.forEach((item, i) => {
-            const value = lines[i] != null ? lines[i] : '';
-            this._writeNode(item, value, mode === 'hide');
-          });
-        }
+        if (unit.kind === 'frag') this._applyFragment(unit.el, translatedText);
+        else this._applyText(unit, translatedText, mode);
       } catch (err) {
         console.warn('[MiriTranslator] apply failed', err);
       } finally {
         this._applying = false;
       }
+    }
+
+    _applyText(unit, translatedText, mode) {
+      const lines = splitAligned(unit.items.map((i) => i.text), translatedText);
+      if (mode === 'bilingual') {
+        this._insertBilingual(unit, lines);
+        return;
+      }
+      unit.items.forEach((item, i) => {
+        this._writeNode(item, lines[i] != null ? lines[i] : '', mode === 'hide');
+      });
+    }
+
+    /** Replace a per-character container with one plain text node. */
+    _applyFragment(el, translatedText) {
+      const rec = this.fragments.get(el) || { html: el.innerHTML, applied: null };
+      if (rec.html == null) rec.html = el.innerHTML;
+      this.fragments.set(el, rec);
+      el.textContent = typeof translatedText === 'string' ? translatedText : String(translatedText || '');
+      rec.applied = el.textContent;
     }
 
     _writeNode(item, translated, hideOriginal) {
@@ -1699,7 +1450,10 @@
     startObserving() {
       if (this.observer || !document.body) return;
       this.observer = new MutationObserver((records) => {
-        if (this._applying || !this.nodes.size) return;
+        if (this._applying || !this.isTranslated) return;
+        // Drop references the page has already discarded before scheduling —
+        // SPAs rebuild their DOM constantly, so this is what keeps the map bounded.
+        this.prune();
         for (const rec of records) {
           const el = rec.target.nodeType === 1 ? rec.target : rec.target.parentElement;
           if (el && el.closest && el.closest('[data-mt]')) continue;
@@ -1726,11 +1480,13 @@
       if (this._timer) return;
       this._timer = setTimeout(async () => {
         this._timer = null;
-        if (this.active || !this.nodes.size) return;
+        if (this.active || !this.isTranslated) return;
+        this.prune();
         const units = this.collect(document.body);
         if (!units.length) return;
         const s = store.get();
         for (const unit of units) {
+          if (unit.kind === 'frag') continue;
           for (const item of unit.items) {
             if (!this.nodes.has(item.node)) {
               this.nodes.set(item.node, {
@@ -1882,11 +1638,12 @@
       this.events.emit('start', { total: units.length });
 
       const engines = this.selectEngines(target, engineId);
-      if (!engines.length) {
-        this.busy = false;
-        this.events.emit('error', new Error(`'${target}'를 번역할 수 있는 엔진이 없습니다.`));
-        throw new Error(`'${target}'를 번역할 수 있는 엔진이 없습니다.`);
-      }
+    if (!engines.length) {
+      this.busy = false;
+      const msg = `'${target}'를 번역할 수 있는 엔진이 없습니다.`;
+      this.events.emit('error', new Error(msg));
+      throw new Error(msg);
+    }
 
       const page = translatorRef.current;
       const applied = new Set();
@@ -1922,16 +1679,10 @@
             let translated = null;
             let lastErr = null;
             for (const engine of engines) {
-              const keys = store.get().keys;
-              const primary = (engine.keys && engine.keys[0] && engine.keys[0].key) || null;
               try {
-                const out = await translateBatch(
-                  engine,
-                  pending.map((i) => i.text),
-                  source,
-                  target,
-                  { signal: localSignal, key: primary ? keys[primary] : undefined, extra: keys },
-                );
+                const out = await translateBatch(engine, pending.map((i) => i.text), source, target, {
+                  signal: localSignal,
+                });
                 if (!out || out.length !== pending.length) throw new Error('응답 개수 불일치');
                 translated = out;
                 this.lastEngine = engine;
@@ -1940,7 +1691,6 @@
               } catch (err) {
                 lastErr = err;
                 if (localSignal.aborted) throw err;
-                if (err && err.fatal) break; // bad key — do not hammer other engines
                 console.warn(`[MiriTranslator] ${engine.id} 실패:`, err && err.message);
               }
             }
@@ -1980,18 +1730,13 @@
       if (this.cache.has(key)) return this.cache.get(key);
       const engines = this.selectEngines(target, engineId);
       if (!engines.length) throw new Error('사용 가능한 번역 엔진이 없습니다');
-      const keys = store.get().keys;
       let lastErr;
       for (const engine of engines) {
-        const primary = (engine.keys && engine.keys[0] && engine.keys[0].key) || null;
         try {
-          const out = await engine.translate([text], source, target, {
-            signal,
-            key: primary ? keys[primary] : undefined,
-            extra: keys,
-          });
+          const out = await engine.translate([text], source, target, { signal });
           this.cache.set(key, out[0]);
           this.events.emit('engine', engine);
+          this.lastEngine = engine;
           return out[0];
         } catch (err) {
           lastErr = err;
@@ -2113,20 +1858,6 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 .mt-root[data-open="1"] .mt-fab { transform: scale(0); opacity: 0; pointer-events: none; }
 
 .mt-fab__icon { width: 26px; height: 26px; display: block; border-radius: 6px; }
-.mt-fab__ring {
-  position: absolute;
-  inset: -3px;
-  width: calc(100% + 6px);
-  height: calc(100% + 6px);
-  transform: rotate(-90deg);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity .2s ease;
-}
-.mt-fab__ring circle { fill: none; stroke: var(--mt-accent); stroke-width: 3; stroke-linecap: round; }
-.mt-fab__track { stroke: var(--mt-border); opacity: .35; }
-.mt-root[data-busy="1"] .mt-fab__ring { opacity: 1; }
-.mt-root[data-busy="1"] .mt-fab__icon { opacity: .35; }
 
 @keyframes mt-fab-in { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
@@ -2302,15 +2033,145 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 }
 @keyframes mt-spin { to { transform: rotate(360deg); } }
 
-.mt-bar { height: 4px; border-radius: 2px; background: var(--mt-border); overflow: hidden; margin: 0 0 12px; }
-.mt-bar[hidden] { display: none; }
-.mt-bar__fill { height: 100%; width: 0; background: var(--mt-accent); transition: width .2s ease; }
+.mt-progress { height: 4px; border-radius: 2px; background: var(--mt-border); overflow: hidden; margin: 0 0 12px; }
+.mt-progress[hidden] { display: none; }
+.mt-progress__fill { height: 100%; width: 0; background: var(--mt-accent); transition: width .2s ease; }
 
 .mt-err { margin: 0 0 10px; color: var(--mt-danger); font-size: 13px; }
 .mt-err[hidden] { display: none; }
 
 .mt-engine-line { margin: -2px 0 10px; font-size: 11.5px; color: var(--mt-faint); }
 .mt-engine-line[hidden] { display: none; }
+
+/* ==========================================================================
+   Mobile — a fixed bottom bar mirroring TWP (Translate Web Pages):
+   [icon] [Original] [Translated] [⋯] [×], 50px tall, menu drops upward.
+   ========================================================================== */
+
+.mt-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 50px;
+  display: none;
+  align-items: center;
+  background: var(--mt-bg);
+  box-shadow: 0 -1px 5px rgba(0, 0, 0, .28);
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: auto;
+  z-index: 30;
+  padding-left: 8px;
+}
+.mt-bar[hidden] { display: none !important; }
+
+.mt-bar__icon {
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border: 0; background: transparent; cursor: pointer;
+  border-radius: 8px;
+}
+.mt-bar__icon svg { width: 30px; height: 30px; border-radius: 7px; }
+
+.mt-bar__btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 50px;
+  border: 0;
+  background: transparent;
+  color: var(--mt-fg);
+  font-family: Roboto, "Google Sans", -apple-system, "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  font-size: 17px;
+  font-weight: 500;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+.mt-bar__btn:active { background: rgba(0, 0, 0, .08); }
+.mt-root[data-theme="dark"] .mt-bar__btn:active { background: rgba(255, 255, 255, .1); }
+.mt-bar__btn[aria-pressed="true"] { color: var(--mt-accent); font-weight: 700; }
+.mt-bar__btn[disabled] { opacity: .45; }
+
+.mt-bar__more,
+.mt-bar__close {
+  flex: 0 0 auto;
+  width: 46px; height: 50px;
+  border: 0; background: transparent;
+  color: var(--mt-fg);
+  cursor: pointer;
+  display: grid; place-items: center;
+}
+.mt-bar__more[aria-expanded="true"] { background: rgba(0, 0, 0, .08); }
+.mt-bar__close { width: 40px; }
+.mt-bar__close svg, .mt-bar__more svg { width: 22px; height: 22px; }
+
+/* Dots for the overflow button, matching TWP. */
+.mt-dots { display: flex; flex-direction: column; gap: 3px; }
+.mt-dots i { display: block; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+
+.mt-bar__spin {
+  flex: 1 1 0;
+  display: none;
+  place-items: center;
+}
+.mt-root[data-busy="1"] .mt-bar__spin { display: grid; }
+.mt-spinner--bar {
+  width: 24px; height: 24px;
+  border: 3px solid rgba(0, 0, 0, .15);
+  border-top-color: var(--mt-accent);
+  border-radius: 50%;
+  animation: mt-spin .8s linear infinite;
+}
+
+/* Upward-opening menu, like TWP's .dropup-content */
+.mt-dropup {
+  position: absolute;
+  right: 0;
+  bottom: 58px;
+  min-width: 240px;
+  max-width: 78vw;
+  padding: 4px 0;
+  background: var(--mt-bg);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, .3);
+  border-radius: 8px;
+  z-index: 31;
+}
+.mt-dropup[hidden] { display: none; }
+.mt-dropup__item {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 13px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--mt-fg);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.mt-dropup__item:active { background: rgba(0, 0, 0, .08); }
+.mt-root[data-theme="dark"] .mt-dropup__item:active { background: rgba(255, 255, 255, .1); }
+.mt-dropup__item small { display: block; color: var(--mt-faint); font-size: 12px; }
+
+/* TWP draws a native <select> invisibly over the menu row. */
+.mt-dropup__select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px; /* stops iOS from zooming on focus */
+}
+
+@media (max-width: 700px), (pointer: coarse) and (max-width: 900px) {
+  .mt-bar { display: flex; }
+  .mt-fab { display: none; }
+  .mt-root[data-open="1"] .mt-fab { display: none; }
+}
 
 .mt-orig {
   display: flex;
@@ -2512,66 +2373,21 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 .mt-toast[hidden] { display: none; }
 @keyframes mt-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
-/* ------------------------------------------------------------- mobile */
-@media (max-width: 700px) {
-  .mt-fab { width: 48px; height: 48px; right: max(14px, env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); }
-  .mt-fab__icon { width: 23px; height: 23px; }
-  .mt-fab[hidden] { display: none; }
-
-  .mt-pop, .mt-sheet {
-    right: 0; left: 0;
-    bottom: 0;
-    width: auto;
-    max-width: none;
-    max-height: 88vh;
-    border-radius: 16px 16px 0 0;
-    padding-bottom: env(safe-area-inset-bottom);
-    transform-origin: bottom center;
-    animation: mt-sheet-in .26s cubic-bezier(.2,0,0,1);
-    overflow: hidden;
-  }
-  .mt-pop::after { display: none; }
-  @keyframes mt-sheet-in { from { transform: translateY(18px); opacity: 0; } to { transform: none; opacity: 1; } }
-
-  .mt-pop__handle {
-    display: block; width: 34px; height: 4px; margin: 8px auto 0;
-    border-radius: 2px; background: var(--mt-border);
-  }
-  .mt-row { padding: 10px 8px 4px 12px; gap: 2px; }
-  .mt-lang__btn { max-width: 38vw; height: 44px; }
-  .mt-swap, .mt-icon { width: 44px; height: 44px; }
-  .mt-body { padding: 4px 14px 0; }
-  .mt-actions { padding: 4px 12px 14px; }
-  .mt-btn { height: 46px; flex: 1 1 auto; }
-  .mt-btn--ghost, .mt-btn--quiet { flex: 0 0 auto; }
-
-  /* On phones the picker fills the whole sheet, like Chrome on Android.
-     The language group must go static so the menu anchors to the sheet
-     instead of the button. Selectors here are deliberately more specific
-     than the desktop rules above. */
-  .mt-lang { position: static; }
-  .mt-root .mt-lang[data-role] .mt-menu,
-  .mt-root .mt-pop .mt-overflow {
-    top: 0; left: 0; right: 0; bottom: 0;
-    min-width: 0; max-width: none;
-    max-height: 100%;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    border-radius: 0;
-    transform: none;
-    padding: 10px 8px 14px;
-  }
-  .mt-menu__search { height: 44px; margin-bottom: 8px; }
-  .mt-menu__list { max-height: none; }
-  .mt-menu__opt { padding: 13px 14px; }
-  .mt-sheet__body { padding: 8px 16px 20px; }
-  .mt-sheet__head { padding: 14px 6px 14px 16px; }
-  .mt-sheet__foot { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
-  .mt-pill { height: 40px; border-radius: 20px; }
+/* ------------------------------------------------------------- mobile
+   On phones the bottom bar *is* the UI (mirrors TWP), so the desktop popup
+   and settings sheet stay out of the way entirely. */
+@media (max-width: 700px), (pointer: coarse) and (max-width: 900px) {
+  .mt-pop, .mt-sheet, .mt-pill { display: none !important; }
+  .mt-toast { bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .mt-bar { padding-bottom: env(safe-area-inset-bottom); height: calc(50px + env(safe-area-inset-bottom)); }
+  .mt-dropup { bottom: calc(58px + env(safe-area-inset-bottom)); }
 }
 
-@media (min-width: 701px) {
-  .mt-pop__handle { display: none; }
+/* Very small phones: keep the two toggle labels readable. */
+@media (max-width: 360px) {
+  .mt-bar__btn { font-size: 15px; }
+  .mt-bar__more { width: 40px; }
+  .mt-bar__close { width: 36px; }
 }
 
 @media (pointer: coarse) {
@@ -2584,7 +2400,7 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 `;
 
 /* ==== src/85-ui.js ================================================== */
-// ==========================================================================
+﻿// ==========================================================================
   // 85 — User interface (shadow DOM, Chrome-like)
 // ==========================================================================
 
@@ -2681,8 +2497,7 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
       this.toastTimer = null;
       this.menuOpen = null;
       this._dragY = null;
-      /** API key inputs typed but not yet saved — survives re-renders. */
-      this.draftKeys = {};
+      this.barDismissed = false;
     }
 
     // ------------------------------------------------------------ mount
@@ -2711,15 +2526,18 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
       this.root = wrap;
       this.el = {
         fab: wrap.querySelector('.mt-fab'),
-        ring: wrap.querySelector('.mt-fab__ring-fill'),
         pop: wrap.querySelector('.mt-pop'),
         sheet: wrap.querySelector('.mt-sheet'),
         hint: wrap.querySelector('.mt-hint'),
         status: wrap.querySelector('.mt-status'),
         statusText: wrap.querySelector('.mt-status__text'),
-        bar: wrap.querySelector('.mt-bar'),
-        barFill: wrap.querySelector('.mt-bar__fill'),
+        bar: wrap.querySelector('.mt-progress'),
+        barFill: wrap.querySelector('.mt-progress__fill'),
         engineLine: wrap.querySelector('.mt-engine-line'),
+        mobileBar: wrap.querySelector('.mt-bar'),
+        barOriginal: wrap.querySelector('[data-mbar="original"]'),
+        barTranslate: wrap.querySelector('[data-mbar="translate"]'),
+        dropup: wrap.querySelector('.mt-dropup'),
         err: wrap.querySelector('.mt-err'),
         orig: wrap.querySelector('.mt-orig'),
         origText: wrap.querySelector('.mt-orig__text'),
@@ -2771,11 +2589,6 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
       return `
         <button class="mt-fab" type="button" aria-label="${esc(s.translateAria)}" title="${esc(s.translateAria)}">
           ${ICON.translate}
-          <svg class="mt-fab__ring" viewBox="0 0 60 60" aria-hidden="true">
-            <circle class="mt-fab__track" cx="30" cy="30" r="26"/>
-            <circle class="mt-fab__ring-fill" cx="30" cy="30" r="26"
-                    stroke-dasharray="163.4" stroke-dashoffset="163.4"/>
-          </svg>
         </button>
 
         <div class="mt-pop" hidden role="dialog" aria-modal="false" aria-label="${esc(s.translate)}">
@@ -2798,7 +2611,7 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
           <div class="mt-body">
             <p class="mt-hint"></p>
             <div class="mt-status" hidden><span class="mt-spinner"></span><span class="mt-status__text"></span></div>
-            <div class="mt-bar" hidden><div class="mt-bar__fill"></div></div>
+            <div class="mt-progress" hidden><div class="mt-progress__fill"></div></div>
             <p class="mt-err" hidden></p>
             <div class="mt-orig" hidden><span class="mt-orig__text"></span></div>
             <div class="mt-engine-line" hidden></div>
@@ -2833,6 +2646,20 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
           <span class="mt-pill__icon" style="width:17px;height:17px;display:block">${ICON.translate}</span>
           <span>${esc(s.translate)}</span>
         </button>
+
+        <div class="mt-bar" hidden>
+          <button class="mt-bar__icon" type="button" data-mbar="popup" aria-label="${esc(s.translate)}">${ICON.translate}</button>
+          <button class="mt-bar__btn" type="button" data-mbar="original" aria-pressed="false">${esc(s.backToOriginal)}</button>
+          <button class="mt-bar__btn" type="button" data-mbar="translate">${esc(s.translate)}</button>
+          <span class="mt-bar__spin" aria-hidden="true"><span class="mt-spinner--bar"></span></span>
+          <button class="mt-bar__more" type="button" data-mbar="menu" aria-label="${esc(s.overflow)}" aria-haspopup="true" aria-expanded="false">
+            <span class="mt-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          </button>
+          <button class="mt-bar__close" type="button" data-mbar="close" aria-label="${esc(s.close)}">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+          <div class="mt-dropup" hidden role="menu"></div>
+        </div>
 
         <div class="mt-toast" role="status" hidden></div>`;
     }
@@ -2943,6 +2770,32 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
       );
       on(document, 'keydown', (e) => this.onKey(e), true);
 
+      // Mobile bottom bar (TWP style)
+      on(this.el.mobileBar, 'click', (e) => {
+        const btn = e.target.closest('[data-mbar]');
+        if (btn) {
+          const act = btn.dataset.mbar;
+          if (act === 'translate') app.translate();
+          else if (act === 'original') app.revert();
+          else if (act === 'menu') this.toggleDropup(btn);
+          else if (act === 'close') this.hideBar();
+          else if (act === 'popup') this.showSettings();
+          return;
+        }
+        const item = e.target.closest('[data-mact]');
+        if (!item) return;
+        if (item.tagName === 'SELECT') return; // handled by change
+        this.handleMobileAction(item.dataset.mact, item);
+      });
+      on(this.el.dropup, 'change', (e) => {
+        if (e.target.matches('[data-mact="langselect"]')) {
+          const code = e.target.value;
+          const patch = code === AUTO ? { sourceLang: AUTO } : { targetLang: code };
+          store.set(patch);
+          this.sync();
+        }
+      });
+
       // Selection bubble
       const showPill = () => this.scheduleSelectionPill();
       on(document, 'mouseup', showPill);
@@ -3005,18 +2858,28 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
     }
 
     // --------------------------------------------------------- open/close
+    /** On phones the bottom bar is the whole UI, so there is nothing to open. */
     open() {
       this.dismissMenus();
-      this.el.pop.hidden = false;
-      this.el.sheet.hidden = true;
-      this.root.setAttribute('data-open', '1');
+      if (!isMobile()) {
+        this.el.pop.hidden = false;
+        this.el.sheet.hidden = true;
+        this.root.setAttribute('data-open', '1');
+      }
       this.sync();
+    }
+
+    /** Close the bar entirely (the × button). Reopen with Alt+T / the menu command. */
+    hideBar() {
+      this.barDismissed = true;
+      this.el.mobileBar.hidden = true;
     }
 
     close() {
       this.el.pop.hidden = true;
       this.el.sheet.hidden = true;
       this.el.overflow.hidden = true;
+      this.el.dropup.hidden = true;
       this.root.removeAttribute('data-open');
       this.hidePill();
     }
@@ -3026,6 +2889,15 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
     }
 
     toggle() {
+      if (isMobile()) {
+        if (this.el.mobileBar.hidden) {
+          this.barDismissed = false;
+          this.el.mobileBar.hidden = false;
+        } else {
+          this.hideBar();
+        }
+        return;
+      }
       if (this.isOpen) this.close();
       else this.open();
     }
@@ -3037,8 +2909,11 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
         g.querySelector('.mt-lang__btn').setAttribute('aria-expanded', 'false');
       }
       if (this.el.overflow) this.el.overflow.hidden = true;
+      if (this.el.dropup) this.el.dropup.hidden = true;
       const ovBtn = this.root.querySelector('[data-act="overflow"]');
       if (ovBtn) ovBtn.setAttribute('aria-expanded', 'false');
+      const moreBtn = this.root.querySelector('[data-mbar="menu"]');
+      if (moreBtn) moreBtn.setAttribute('aria-expanded', 'false');
       this.hidePill();
     }
 
@@ -3108,7 +2983,7 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
         });
       }
 
-      this.el.fab.hidden = !s.showFab;
+      this.el.fab.hidden = !s.showFab || isMobile();
       this.root.setAttribute('data-busy', busy ? '1' : '0');
       this.el.hint.textContent = t().idleHint;
       this.el.hint.hidden = !(!busy && !translated && !this.selectionText);
@@ -3143,14 +3018,98 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
         engineLine.hidden = !engine;
         engineLine.textContent = engine ? engine.label : '';
       }
+
+      // Mobile bar mirrors the same state.
+      this.el.mobileBar.hidden = !isMobile() || this.barDismissed;
+      this.el.barOriginal.setAttribute('aria-pressed', String(translated));
+      this.el.barTranslate.setAttribute('aria-pressed', String(busy));
+      this.el.barOriginal.disabled = !translated || busy;
+      this.el.barTranslate.disabled = busy;
+    }
+
+    // -------------------------------------------------- mobile bar (TWP)
+    toggleDropup(btn) {
+      const menu = this.el.dropup;
+      const wasHidden = menu.hidden;
+      this.dismissMenus();
+      if (wasHidden) {
+        const s = store.get();
+        const host = hostOf(location.href);
+        const langs = listLanguages();
+        const options = [`<option value="${AUTO}"${s.sourceLang === AUTO ? ' selected' : ''}>${esc(t().detect)}</option>`]
+          .concat(
+            langs.map(
+              (l) =>
+                `<option value="${esc(l.code)}"${l.code === s.targetLang ? ' selected' : ''}>${esc(`${l.flag} ${l.native} (${l.en})`)}</option>`,
+            ),
+          )
+          .join('');
+        menu.innerHTML = `
+          <button class="mt-dropup__item" type="button" data-mact="language">
+            ${isKO ? '번역 언어 변경' : 'Choose another language'}
+            <small>${esc(langShort(s.targetLang))}</small>
+            <select class="mt-dropup__select" data-mact="langselect">${options}</select>
+          </button>
+          <button class="mt-dropup__item" type="button" data-mact="engine">
+            ${isKO ? '번역 엔진' : 'Translation engine'}
+            <small>${esc(s.engineId === 'auto' ? t().engineAuto : (ENGINE_BY_ID.get(s.engineId) || {}).label || s.engineId)}</small>
+          </button>
+          <button class="mt-dropup__item" type="button" data-mact="selection">
+            ${isKO ? '드래그 번역' : 'Translate selected text'}
+            <small>${s.selectionBubble ? (isKO ? '켜짐' : 'On') : (isKO ? '꺼짐' : 'Off')}</small>
+          </button>
+          <button class="mt-dropup__item" type="button" data-mact="never">
+            ${isKO ? '이 사이트 번역 안 함' : 'Never translate this site'}
+            <small>${esc(host)}</small>
+          </button>
+          <button class="mt-dropup__item" type="button" data-mact="settings">${isKO ? '설정' : 'More options'}</button>`;
+        menu.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+      }
+    }
+
+    handleMobileAction(action, node) {
+      const s = store.get();
+      if (action === 'language') return; // the native <select> handles it
+      if (action === 'settings') {
+        this.dismissMenus();
+        this.showSettings();
+        return;
+      }
+      if (action === 'selection') {
+        store.set({ selectionBubble: !s.selectionBubble });
+        this.toast(store.get().selectionBubble ? (isKO ? '드래그 번역을 켰습니다.' : 'Selection translation on') : (isKO ? '드래그 번역을 껐습니다.' : 'Selection translation off'));
+      } else if (action === 'never') {
+        const host = hostOf(location.href);
+        const next = Array.isArray(s.neverSites) ? s.neverSites.slice() : [];
+        const idx = next.findIndex((x) => hostOf(x) === host);
+        if (idx === -1) next.push(host);
+        else next.splice(idx, 1);
+        store.set({ neverSites: next });
+        this.toast(
+          matchesList(host, store.get().neverSites)
+            ? (isKO ? '이 사이트를 번역 목록에서 제외했습니다.' : 'Site excluded')
+            : (isKO ? '이 사이트를 다시 번역합니다.' : 'Site included again'),
+        );
+      } else if (action === 'engine') {
+        const ids = ['auto', ...ENGINES.map((e) => e.id)];
+        const cur = s.engineId === 'auto' ? 0 : ids.indexOf(s.engineId);
+        const nextId = ids[(cur + 1) % ids.length];
+        store.set({ engineId: nextId });
+        this.toast(
+          nextId === 'auto'
+            ? t().engineAuto
+            : `${(ENGINE_BY_ID.get(nextId) || {}).label || nextId}`,
+        );
+      }
+      const moreBtn = this.root.querySelector('[data-mbar="menu"]');
+      this.toggleDropup(moreBtn);
     }
 
     setProgress(done, total) {
       const pct = total ? clamp(done / total, 0, 1) : 0;
       this.el.barFill.style.width = `${Math.round(pct * 100)}%`;
       this.el.statusText.textContent = `${t().translating} ${done} ${t().of} ${total} ${t().blocks}`;
-      const C = 163.4;
-      if (this.el.ring) this.el.ring.setAttribute('stroke-dashoffset', String(C * (1 - pct)));
     }
 
     // ----------------------------------------------------------- actions
@@ -3341,21 +3300,19 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 
     // ---------------------------------------------------------- settings
     showSettings() {
+      // On phones the panel becomes a full-screen sheet anchored above the bar.
       this.el.pop.hidden = true;
       this.renderSettings();
       this.el.sheet.hidden = false;
     }
 
     renderSettings() {
-      // Harvest anything typed but not saved so re-renders never lose input.
-      this.harvestDraftKeys();
       const s = store.get();
       const langs = listLanguages();
       const engineOptions = [
         `<option value="auto"${s.engineId === 'auto' ? ' selected' : ''}>${esc(t().engineAuto)}</option>`,
         ...ENGINES.map(
-          (e) =>
-            `<option value="${esc(e.id)}"${s.engineId === e.id ? ' selected' : ''}>${esc(e.label)}${engineUsable(e) ? '' : ` (${isKO ? '키 필요' : 'key'})`}</option>`,
+          (e) => `<option value="${esc(e.id)}"${s.engineId === e.id ? ' selected' : ''}>${esc(e.label)}</option>`,
         ),
       ].join('');
 
@@ -3375,22 +3332,13 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
         )
         .join('');
 
-      const engineCards = ENGINES.map((e) => {
-        const usable = engineUsable(e);
-        const tag = e.keyless
-          ? `<span class="mt-tag mt-tag--free">${isKO ? '키 불필요' : 'No key'}</span>`
-          : usable
-            ? `<span class="mt-tag mt-tag--free">${isKO ? '설정됨' : 'Ready'}</span>`
-            : `<span class="mt-tag mt-tag--warn">${isKO ? '키 필요' : 'Key needed'}</span>`;
-        return `<div class="mt-engine">
+      const engineCards = ENGINES.map(
+        (e) => `<div class="mt-engine">
             <span class="mt-engine__dot" style="background:${esc(e.color || '#888')}"></span>
             <span class="mt-engine__meta"><b>${esc(e.label)}</b><small>${esc(e.sub)}</small></span>
-            ${tag}
-          </div>`;
-      }).join('');
-
-      const keyed = ENGINES.filter((e) => e.keys && e.keys.length);
-      const keyBlocks = keyed.map((e) => this.renderKeyBlock(e)).join('');
+            <span class="mt-tag mt-tag--free">${isKO ? '키 불필요' : 'No key'}</span>
+          </div>`,
+      ).join('');
 
       this.el.sheetBody.innerHTML = `
         <div class="mt-field">
@@ -3410,11 +3358,9 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
           <span class="mt-field__label">${isKO ? '번역 엔진' : 'Translation engine'}</span>
           <select class="mt-select" id="mt-set-engine">${engineOptions}</select>
           <p class="mt-field__hint">${isKO
-            ? '“자동”은 선택한 언어와 키 설정을 만족하는 엔진을 우선순위대로 사용합니다. 실패하면 자동으로 다음 엔진으로 넘어갑니다.'
-            : '“Automatic” walks the priority list, skipping engines that lack a key or do not support the language pair.'}</p>
+            ? '“자동”은 대상 언어를 지원하는 엔진을 좋은 순서대로 사용하고, 실패하면 다음 엔진으로 넘어갑니다. 모든 엔진은 API 키가 필요 없습니다.'
+            : '“Automatic” walks the engines in quality order, skipping any that do not support the target language and falling through on failure. No API key is required by any of them.'}</p>
         </div>
-
-        ${keyBlocks}
 
         <div class="mt-field">
           <span class="mt-field__label">${isKO ? '표시 방식' : 'Display mode'}</span>
@@ -3437,8 +3383,8 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
           <label class="mt-switch">
             <input type="checkbox" id="mt-set-fab"${s.showFab ? ' checked' : ''}>
             <span class="mt-switch__track"></span>
-            <span class="mt-switch__text"><b>${isKO ? '번역 버튼 표시' : 'Show floating button'}</b><small>${isKO
-              ? '우측 하단에 항상 표시합니다.' : 'Keep the floating action button visible.'}</small></span>
+            <span class="mt-switch__text"><b>${isKO ? '플로팅 버튼 표시' : 'Show floating button'}</b><small>${isKO
+              ? '기본은 꺼짐입니다. Alt+T 로도 팝업을 열 수 있습니다.' : 'Off by default. Alt+T opens the popup too.'}</small></span>
           </label>
           <label class="mt-switch">
             <input type="checkbox" id="mt-set-skipcode"${s.skipCode ? ' checked' : ''}>
@@ -3467,7 +3413,7 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
         </div>
 
         <div class="mt-field">
-          <span class="mt-field__label">${isKO ? '사용 가능한 엔진' : 'Available engines'}</span>
+          <span class="mt-field__label">${isKO ? '번역 엔진' : 'Engines'}</span>
           ${engineCards}
         </div>
 
@@ -3483,8 +3429,8 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 
         <p class="mt-note">
           ${isKO
-            ? '키가 필요 없는 엔진은 <b>Google · 파파고 · DeepL · MyMemory · Reverso</b> 입니다. 요청 내용은 번역을 위해 선택한 서비스로만 전송됩니다.'
-            : 'Keyless engines: <b>Google · Papago · DeepL · MyMemory · Reverso</b>. Page text is only sent to the translation service you choose.'}
+            ? '모든 엔진(<b>Google · 파파고 · DeepL · MyMemory · Reverso</b>)이 API 키 없이 동작합니다. 페이지 본문은 번역을 위해 선택한 서비스로만 전송됩니다.'
+            : 'Every engine (<b>Google · Papago · DeepL · MyMemory · Reverso</b>) works without an API key. Page text is only sent to the service you pick.'}
           <br>${esc(`${APP.name} v${APP.version}`)}
         </p>`;
 
@@ -3494,10 +3440,7 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
       };
       bind('#mt-set-tgt', 'change', (e) => store.set({ targetLang: e.target.value }));
       bind('#mt-set-src', 'change', (e) => store.set({ sourceLang: e.target.value }));
-      bind('#mt-set-engine', 'change', (e) => {
-        store.set({ engineId: e.target.value });
-        this.renderSettings();
-      });
+      bind('#mt-set-engine', 'change', (e) => store.set({ engineId: e.target.value }));
       bind('#mt-set-always', 'change', (e) => store.set({ alwaysOn: e.target.checked }));
       bind('#mt-set-bubble', 'change', (e) => store.set({ selectionBubble: e.target.checked }));
       bind('#mt-set-fab', 'change', (e) => store.set({ showFab: e.target.checked }));
@@ -3519,44 +3462,11 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
       }
     }
 
-    renderKeyBlock(engine) {
-      const s = store.get();
-      const inputs = engine.keys
-        .map((k) => {
-          const saved = s.keys[k.key] || k.default || '';
-          const value = Object.prototype.hasOwnProperty.call(this.draftKeys, k.key)
-            ? this.draftKeys[k.key]
-            : saved;
-          const id = `mt-key-${k.key}`;
-          return `<div class="mt-field">
-              <label class="mt-field__label" for="${id}">${esc(k.label)}</label>
-              <input class="mt-input" id="${id}" type="${k.type || 'text'}"
-                     value="${esc(value)}" placeholder="${esc(k.placeholder || '')}"
-                     autocomplete="off" spellcheck="false" data-key="${esc(k.key)}">
-            </div>`;
-        })
-        .join('');
-      return `<div class="mt-keys" data-engine="${esc(engine.id)}">
-          <p class="mt-field__label" style="margin-bottom:10px">${esc(engine.label)} — ${esc(engine.sub)}</p>
-          ${inputs}
-        </div>`;
-    }
-
     saveSettings() {
-      this.harvestDraftKeys();
-      store.set({ keys: this.draftKeys });
-      this.draftKeys = {};
+      // Every option is applied on change, so saving only closes the panel.
       this.el.sheet.hidden = true;
       this.sync();
       this.toast(isKO ? '설정을 저장했습니다.' : 'Settings saved.');
-    }
-
-    /** Copy the current key inputs into the draft so re-renders preserve them. */
-    harvestDraftKeys() {
-      this.el.sheetBody.querySelectorAll('[data-key]').forEach((input) => {
-        this.draftKeys[input.dataset.key] = input.value.trim();
-      });
-      return this.draftKeys;
     }
 
     // -------------------------------------------------------------- misc

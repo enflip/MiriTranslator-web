@@ -1,4 +1,4 @@
-// ==========================================================================
+﻿// ==========================================================================
   // 85 — User interface (shadow DOM, Chrome-like)
 // ==========================================================================
 
@@ -95,8 +95,7 @@
       this.toastTimer = null;
       this.menuOpen = null;
       this._dragY = null;
-      /** API key inputs typed but not yet saved — survives re-renders. */
-      this.draftKeys = {};
+      this.barDismissed = false;
     }
 
     // ------------------------------------------------------------ mount
@@ -125,15 +124,18 @@
       this.root = wrap;
       this.el = {
         fab: wrap.querySelector('.mt-fab'),
-        ring: wrap.querySelector('.mt-fab__ring-fill'),
         pop: wrap.querySelector('.mt-pop'),
         sheet: wrap.querySelector('.mt-sheet'),
         hint: wrap.querySelector('.mt-hint'),
         status: wrap.querySelector('.mt-status'),
         statusText: wrap.querySelector('.mt-status__text'),
-        bar: wrap.querySelector('.mt-bar'),
-        barFill: wrap.querySelector('.mt-bar__fill'),
+        bar: wrap.querySelector('.mt-progress'),
+        barFill: wrap.querySelector('.mt-progress__fill'),
         engineLine: wrap.querySelector('.mt-engine-line'),
+        mobileBar: wrap.querySelector('.mt-bar'),
+        barOriginal: wrap.querySelector('[data-mbar="original"]'),
+        barTranslate: wrap.querySelector('[data-mbar="translate"]'),
+        dropup: wrap.querySelector('.mt-dropup'),
         err: wrap.querySelector('.mt-err'),
         orig: wrap.querySelector('.mt-orig'),
         origText: wrap.querySelector('.mt-orig__text'),
@@ -185,11 +187,6 @@
       return `
         <button class="mt-fab" type="button" aria-label="${esc(s.translateAria)}" title="${esc(s.translateAria)}">
           ${ICON.translate}
-          <svg class="mt-fab__ring" viewBox="0 0 60 60" aria-hidden="true">
-            <circle class="mt-fab__track" cx="30" cy="30" r="26"/>
-            <circle class="mt-fab__ring-fill" cx="30" cy="30" r="26"
-                    stroke-dasharray="163.4" stroke-dashoffset="163.4"/>
-          </svg>
         </button>
 
         <div class="mt-pop" hidden role="dialog" aria-modal="false" aria-label="${esc(s.translate)}">
@@ -212,7 +209,7 @@
           <div class="mt-body">
             <p class="mt-hint"></p>
             <div class="mt-status" hidden><span class="mt-spinner"></span><span class="mt-status__text"></span></div>
-            <div class="mt-bar" hidden><div class="mt-bar__fill"></div></div>
+            <div class="mt-progress" hidden><div class="mt-progress__fill"></div></div>
             <p class="mt-err" hidden></p>
             <div class="mt-orig" hidden><span class="mt-orig__text"></span></div>
             <div class="mt-engine-line" hidden></div>
@@ -247,6 +244,20 @@
           <span class="mt-pill__icon" style="width:17px;height:17px;display:block">${ICON.translate}</span>
           <span>${esc(s.translate)}</span>
         </button>
+
+        <div class="mt-bar" hidden>
+          <button class="mt-bar__icon" type="button" data-mbar="popup" aria-label="${esc(s.translate)}">${ICON.translate}</button>
+          <button class="mt-bar__btn" type="button" data-mbar="original" aria-pressed="false">${esc(s.backToOriginal)}</button>
+          <button class="mt-bar__btn" type="button" data-mbar="translate">${esc(s.translate)}</button>
+          <span class="mt-bar__spin" aria-hidden="true"><span class="mt-spinner--bar"></span></span>
+          <button class="mt-bar__more" type="button" data-mbar="menu" aria-label="${esc(s.overflow)}" aria-haspopup="true" aria-expanded="false">
+            <span class="mt-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          </button>
+          <button class="mt-bar__close" type="button" data-mbar="close" aria-label="${esc(s.close)}">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+          <div class="mt-dropup" hidden role="menu"></div>
+        </div>
 
         <div class="mt-toast" role="status" hidden></div>`;
     }
@@ -357,6 +368,32 @@
       );
       on(document, 'keydown', (e) => this.onKey(e), true);
 
+      // Mobile bottom bar (TWP style)
+      on(this.el.mobileBar, 'click', (e) => {
+        const btn = e.target.closest('[data-mbar]');
+        if (btn) {
+          const act = btn.dataset.mbar;
+          if (act === 'translate') app.translate();
+          else if (act === 'original') app.revert();
+          else if (act === 'menu') this.toggleDropup(btn);
+          else if (act === 'close') this.hideBar();
+          else if (act === 'popup') this.showSettings();
+          return;
+        }
+        const item = e.target.closest('[data-mact]');
+        if (!item) return;
+        if (item.tagName === 'SELECT') return; // handled by change
+        this.handleMobileAction(item.dataset.mact, item);
+      });
+      on(this.el.dropup, 'change', (e) => {
+        if (e.target.matches('[data-mact="langselect"]')) {
+          const code = e.target.value;
+          const patch = code === AUTO ? { sourceLang: AUTO } : { targetLang: code };
+          store.set(patch);
+          this.sync();
+        }
+      });
+
       // Selection bubble
       const showPill = () => this.scheduleSelectionPill();
       on(document, 'mouseup', showPill);
@@ -419,18 +456,28 @@
     }
 
     // --------------------------------------------------------- open/close
+    /** On phones the bottom bar is the whole UI, so there is nothing to open. */
     open() {
       this.dismissMenus();
-      this.el.pop.hidden = false;
-      this.el.sheet.hidden = true;
-      this.root.setAttribute('data-open', '1');
+      if (!isMobile()) {
+        this.el.pop.hidden = false;
+        this.el.sheet.hidden = true;
+        this.root.setAttribute('data-open', '1');
+      }
       this.sync();
+    }
+
+    /** Close the bar entirely (the × button). Reopen with Alt+T / the menu command. */
+    hideBar() {
+      this.barDismissed = true;
+      this.el.mobileBar.hidden = true;
     }
 
     close() {
       this.el.pop.hidden = true;
       this.el.sheet.hidden = true;
       this.el.overflow.hidden = true;
+      this.el.dropup.hidden = true;
       this.root.removeAttribute('data-open');
       this.hidePill();
     }
@@ -440,6 +487,15 @@
     }
 
     toggle() {
+      if (isMobile()) {
+        if (this.el.mobileBar.hidden) {
+          this.barDismissed = false;
+          this.el.mobileBar.hidden = false;
+        } else {
+          this.hideBar();
+        }
+        return;
+      }
       if (this.isOpen) this.close();
       else this.open();
     }
@@ -451,8 +507,11 @@
         g.querySelector('.mt-lang__btn').setAttribute('aria-expanded', 'false');
       }
       if (this.el.overflow) this.el.overflow.hidden = true;
+      if (this.el.dropup) this.el.dropup.hidden = true;
       const ovBtn = this.root.querySelector('[data-act="overflow"]');
       if (ovBtn) ovBtn.setAttribute('aria-expanded', 'false');
+      const moreBtn = this.root.querySelector('[data-mbar="menu"]');
+      if (moreBtn) moreBtn.setAttribute('aria-expanded', 'false');
       this.hidePill();
     }
 
@@ -522,7 +581,7 @@
         });
       }
 
-      this.el.fab.hidden = !s.showFab;
+      this.el.fab.hidden = !s.showFab || isMobile();
       this.root.setAttribute('data-busy', busy ? '1' : '0');
       this.el.hint.textContent = t().idleHint;
       this.el.hint.hidden = !(!busy && !translated && !this.selectionText);
@@ -557,14 +616,98 @@
         engineLine.hidden = !engine;
         engineLine.textContent = engine ? engine.label : '';
       }
+
+      // Mobile bar mirrors the same state.
+      this.el.mobileBar.hidden = !isMobile() || this.barDismissed;
+      this.el.barOriginal.setAttribute('aria-pressed', String(translated));
+      this.el.barTranslate.setAttribute('aria-pressed', String(busy));
+      this.el.barOriginal.disabled = !translated || busy;
+      this.el.barTranslate.disabled = busy;
+    }
+
+    // -------------------------------------------------- mobile bar (TWP)
+    toggleDropup(btn) {
+      const menu = this.el.dropup;
+      const wasHidden = menu.hidden;
+      this.dismissMenus();
+      if (wasHidden) {
+        const s = store.get();
+        const host = hostOf(location.href);
+        const langs = listLanguages();
+        const options = [`<option value="${AUTO}"${s.sourceLang === AUTO ? ' selected' : ''}>${esc(t().detect)}</option>`]
+          .concat(
+            langs.map(
+              (l) =>
+                `<option value="${esc(l.code)}"${l.code === s.targetLang ? ' selected' : ''}>${esc(`${l.flag} ${l.native} (${l.en})`)}</option>`,
+            ),
+          )
+          .join('');
+        menu.innerHTML = `
+          <button class="mt-dropup__item" type="button" data-mact="language">
+            ${isKO ? '번역 언어 변경' : 'Choose another language'}
+            <small>${esc(langShort(s.targetLang))}</small>
+            <select class="mt-dropup__select" data-mact="langselect">${options}</select>
+          </button>
+          <button class="mt-dropup__item" type="button" data-mact="engine">
+            ${isKO ? '번역 엔진' : 'Translation engine'}
+            <small>${esc(s.engineId === 'auto' ? t().engineAuto : (ENGINE_BY_ID.get(s.engineId) || {}).label || s.engineId)}</small>
+          </button>
+          <button class="mt-dropup__item" type="button" data-mact="selection">
+            ${isKO ? '드래그 번역' : 'Translate selected text'}
+            <small>${s.selectionBubble ? (isKO ? '켜짐' : 'On') : (isKO ? '꺼짐' : 'Off')}</small>
+          </button>
+          <button class="mt-dropup__item" type="button" data-mact="never">
+            ${isKO ? '이 사이트 번역 안 함' : 'Never translate this site'}
+            <small>${esc(host)}</small>
+          </button>
+          <button class="mt-dropup__item" type="button" data-mact="settings">${isKO ? '설정' : 'More options'}</button>`;
+        menu.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+      }
+    }
+
+    handleMobileAction(action, node) {
+      const s = store.get();
+      if (action === 'language') return; // the native <select> handles it
+      if (action === 'settings') {
+        this.dismissMenus();
+        this.showSettings();
+        return;
+      }
+      if (action === 'selection') {
+        store.set({ selectionBubble: !s.selectionBubble });
+        this.toast(store.get().selectionBubble ? (isKO ? '드래그 번역을 켰습니다.' : 'Selection translation on') : (isKO ? '드래그 번역을 껐습니다.' : 'Selection translation off'));
+      } else if (action === 'never') {
+        const host = hostOf(location.href);
+        const next = Array.isArray(s.neverSites) ? s.neverSites.slice() : [];
+        const idx = next.findIndex((x) => hostOf(x) === host);
+        if (idx === -1) next.push(host);
+        else next.splice(idx, 1);
+        store.set({ neverSites: next });
+        this.toast(
+          matchesList(host, store.get().neverSites)
+            ? (isKO ? '이 사이트를 번역 목록에서 제외했습니다.' : 'Site excluded')
+            : (isKO ? '이 사이트를 다시 번역합니다.' : 'Site included again'),
+        );
+      } else if (action === 'engine') {
+        const ids = ['auto', ...ENGINES.map((e) => e.id)];
+        const cur = s.engineId === 'auto' ? 0 : ids.indexOf(s.engineId);
+        const nextId = ids[(cur + 1) % ids.length];
+        store.set({ engineId: nextId });
+        this.toast(
+          nextId === 'auto'
+            ? t().engineAuto
+            : `${(ENGINE_BY_ID.get(nextId) || {}).label || nextId}`,
+        );
+      }
+      const moreBtn = this.root.querySelector('[data-mbar="menu"]');
+      this.toggleDropup(moreBtn);
     }
 
     setProgress(done, total) {
       const pct = total ? clamp(done / total, 0, 1) : 0;
       this.el.barFill.style.width = `${Math.round(pct * 100)}%`;
       this.el.statusText.textContent = `${t().translating} ${done} ${t().of} ${total} ${t().blocks}`;
-      const C = 163.4;
-      if (this.el.ring) this.el.ring.setAttribute('stroke-dashoffset', String(C * (1 - pct)));
     }
 
     // ----------------------------------------------------------- actions
@@ -755,21 +898,19 @@
 
     // ---------------------------------------------------------- settings
     showSettings() {
+      // On phones the panel becomes a full-screen sheet anchored above the bar.
       this.el.pop.hidden = true;
       this.renderSettings();
       this.el.sheet.hidden = false;
     }
 
     renderSettings() {
-      // Harvest anything typed but not saved so re-renders never lose input.
-      this.harvestDraftKeys();
       const s = store.get();
       const langs = listLanguages();
       const engineOptions = [
         `<option value="auto"${s.engineId === 'auto' ? ' selected' : ''}>${esc(t().engineAuto)}</option>`,
         ...ENGINES.map(
-          (e) =>
-            `<option value="${esc(e.id)}"${s.engineId === e.id ? ' selected' : ''}>${esc(e.label)}${engineUsable(e) ? '' : ` (${isKO ? '키 필요' : 'key'})`}</option>`,
+          (e) => `<option value="${esc(e.id)}"${s.engineId === e.id ? ' selected' : ''}>${esc(e.label)}</option>`,
         ),
       ].join('');
 
@@ -789,22 +930,13 @@
         )
         .join('');
 
-      const engineCards = ENGINES.map((e) => {
-        const usable = engineUsable(e);
-        const tag = e.keyless
-          ? `<span class="mt-tag mt-tag--free">${isKO ? '키 불필요' : 'No key'}</span>`
-          : usable
-            ? `<span class="mt-tag mt-tag--free">${isKO ? '설정됨' : 'Ready'}</span>`
-            : `<span class="mt-tag mt-tag--warn">${isKO ? '키 필요' : 'Key needed'}</span>`;
-        return `<div class="mt-engine">
+      const engineCards = ENGINES.map(
+        (e) => `<div class="mt-engine">
             <span class="mt-engine__dot" style="background:${esc(e.color || '#888')}"></span>
             <span class="mt-engine__meta"><b>${esc(e.label)}</b><small>${esc(e.sub)}</small></span>
-            ${tag}
-          </div>`;
-      }).join('');
-
-      const keyed = ENGINES.filter((e) => e.keys && e.keys.length);
-      const keyBlocks = keyed.map((e) => this.renderKeyBlock(e)).join('');
+            <span class="mt-tag mt-tag--free">${isKO ? '키 불필요' : 'No key'}</span>
+          </div>`,
+      ).join('');
 
       this.el.sheetBody.innerHTML = `
         <div class="mt-field">
@@ -824,11 +956,9 @@
           <span class="mt-field__label">${isKO ? '번역 엔진' : 'Translation engine'}</span>
           <select class="mt-select" id="mt-set-engine">${engineOptions}</select>
           <p class="mt-field__hint">${isKO
-            ? '“자동”은 선택한 언어와 키 설정을 만족하는 엔진을 우선순위대로 사용합니다. 실패하면 자동으로 다음 엔진으로 넘어갑니다.'
-            : '“Automatic” walks the priority list, skipping engines that lack a key or do not support the language pair.'}</p>
+            ? '“자동”은 대상 언어를 지원하는 엔진을 좋은 순서대로 사용하고, 실패하면 다음 엔진으로 넘어갑니다. 모든 엔진은 API 키가 필요 없습니다.'
+            : '“Automatic” walks the engines in quality order, skipping any that do not support the target language and falling through on failure. No API key is required by any of them.'}</p>
         </div>
-
-        ${keyBlocks}
 
         <div class="mt-field">
           <span class="mt-field__label">${isKO ? '표시 방식' : 'Display mode'}</span>
@@ -851,8 +981,8 @@
           <label class="mt-switch">
             <input type="checkbox" id="mt-set-fab"${s.showFab ? ' checked' : ''}>
             <span class="mt-switch__track"></span>
-            <span class="mt-switch__text"><b>${isKO ? '번역 버튼 표시' : 'Show floating button'}</b><small>${isKO
-              ? '우측 하단에 항상 표시합니다.' : 'Keep the floating action button visible.'}</small></span>
+            <span class="mt-switch__text"><b>${isKO ? '플로팅 버튼 표시' : 'Show floating button'}</b><small>${isKO
+              ? '기본은 꺼짐입니다. Alt+T 로도 팝업을 열 수 있습니다.' : 'Off by default. Alt+T opens the popup too.'}</small></span>
           </label>
           <label class="mt-switch">
             <input type="checkbox" id="mt-set-skipcode"${s.skipCode ? ' checked' : ''}>
@@ -881,7 +1011,7 @@
         </div>
 
         <div class="mt-field">
-          <span class="mt-field__label">${isKO ? '사용 가능한 엔진' : 'Available engines'}</span>
+          <span class="mt-field__label">${isKO ? '번역 엔진' : 'Engines'}</span>
           ${engineCards}
         </div>
 
@@ -897,8 +1027,8 @@
 
         <p class="mt-note">
           ${isKO
-            ? '키가 필요 없는 엔진은 <b>Google · 파파고 · DeepL · MyMemory · Reverso</b> 입니다. 요청 내용은 번역을 위해 선택한 서비스로만 전송됩니다.'
-            : 'Keyless engines: <b>Google · Papago · DeepL · MyMemory · Reverso</b>. Page text is only sent to the translation service you choose.'}
+            ? '모든 엔진(<b>Google · 파파고 · DeepL · MyMemory · Reverso</b>)이 API 키 없이 동작합니다. 페이지 본문은 번역을 위해 선택한 서비스로만 전송됩니다.'
+            : 'Every engine (<b>Google · Papago · DeepL · MyMemory · Reverso</b>) works without an API key. Page text is only sent to the service you pick.'}
           <br>${esc(`${APP.name} v${APP.version}`)}
         </p>`;
 
@@ -908,10 +1038,7 @@
       };
       bind('#mt-set-tgt', 'change', (e) => store.set({ targetLang: e.target.value }));
       bind('#mt-set-src', 'change', (e) => store.set({ sourceLang: e.target.value }));
-      bind('#mt-set-engine', 'change', (e) => {
-        store.set({ engineId: e.target.value });
-        this.renderSettings();
-      });
+      bind('#mt-set-engine', 'change', (e) => store.set({ engineId: e.target.value }));
       bind('#mt-set-always', 'change', (e) => store.set({ alwaysOn: e.target.checked }));
       bind('#mt-set-bubble', 'change', (e) => store.set({ selectionBubble: e.target.checked }));
       bind('#mt-set-fab', 'change', (e) => store.set({ showFab: e.target.checked }));
@@ -933,44 +1060,11 @@
       }
     }
 
-    renderKeyBlock(engine) {
-      const s = store.get();
-      const inputs = engine.keys
-        .map((k) => {
-          const saved = s.keys[k.key] || k.default || '';
-          const value = Object.prototype.hasOwnProperty.call(this.draftKeys, k.key)
-            ? this.draftKeys[k.key]
-            : saved;
-          const id = `mt-key-${k.key}`;
-          return `<div class="mt-field">
-              <label class="mt-field__label" for="${id}">${esc(k.label)}</label>
-              <input class="mt-input" id="${id}" type="${k.type || 'text'}"
-                     value="${esc(value)}" placeholder="${esc(k.placeholder || '')}"
-                     autocomplete="off" spellcheck="false" data-key="${esc(k.key)}">
-            </div>`;
-        })
-        .join('');
-      return `<div class="mt-keys" data-engine="${esc(engine.id)}">
-          <p class="mt-field__label" style="margin-bottom:10px">${esc(engine.label)} — ${esc(engine.sub)}</p>
-          ${inputs}
-        </div>`;
-    }
-
     saveSettings() {
-      this.harvestDraftKeys();
-      store.set({ keys: this.draftKeys });
-      this.draftKeys = {};
+      // Every option is applied on change, so saving only closes the panel.
       this.el.sheet.hidden = true;
       this.sync();
       this.toast(isKO ? '설정을 저장했습니다.' : 'Settings saved.');
-    }
-
-    /** Copy the current key inputs into the draft so re-renders preserve them. */
-    harvestDraftKeys() {
-      this.el.sheetBody.querySelectorAll('[data-key]').forEach((input) => {
-        this.draftKeys[input.dataset.key] = input.value.trim();
-      });
-      return this.draftKeys;
     }
 
     // -------------------------------------------------------------- misc

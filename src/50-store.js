@@ -12,7 +12,7 @@
     /** Selected engine id, or 'auto' to let the scheduler choose. */
     engineId: 'auto',
     /** Fallback order used when engineId === 'auto'. */
-    priority: ['google', 'papago', 'deepl-web', 'deepl-api', 'microsoft', 'papago-cloud', 'gcloud', 'mymemory', 'reverso', 'libre', 'custom'],
+    priority: ['google', 'papago', 'deepl-web', 'mymemory', 'reverso'],
     /** replace | bilingual | hide */
     mode: 'replace',
     /** Translate every matching page without asking. */
@@ -21,8 +21,8 @@
     autoSites: [],
     /** Sites never translated. */
     neverSites: [],
-    /** Floating button visibility. */
-    showFab: true,
+    /** Floating button visibility — off by default; the shortcut opens the popup. */
+    showFab: false,
     /** auto | light | dark */
     theme: 'auto',
     /** Selection bubble. */
@@ -35,8 +35,6 @@
     ignoreSelectors: '',
     /** Global request cap across all engines. */
     concurrency: 6,
-    /** Read API keys from the store instead of prompting. */
-    keys: {},
     /** Show a toast when the page is already in the target language. */
     skipSameLanguage: true,
     /** Remember the last page's language detection in memory. */
@@ -67,15 +65,13 @@
 
   /** Deep merge stored values over the defaults. */
   function mergeDefaults(stored) {
-    const out = { ...DEFAULT_SETTINGS, keys: {} };
+    const out = { ...DEFAULT_SETTINGS };
     if (!stored || typeof stored !== 'object') return out;
     for (const [key, value] of Object.entries(stored)) {
-      if (key === 'keys') {
-        out.keys = { ...(stored.keys || {}) };
-      } else if (key in DEFAULT_SETTINGS) {
-        out[key] = value;
-      }
+      if (key in DEFAULT_SETTINGS) out[key] = value;
     }
+    // Drop engines that no longer ship, so an old config cannot break selection.
+    if (Array.isArray(out.priority)) out.priority = out.priority.filter((id) => ENGINE_BY_ID.has(id));
     return out;
   }
 
@@ -85,17 +81,13 @@
 
   const store = {
     get: () => state,
-    /** Shallow patch (nested objects are merged). */
+    /** Shallow patch. */
     set(patch) {
       const next = { ...state, ...patch };
-      if (patch.keys) next.keys = { ...state.keys, ...patch.keys };
       state = mergeDefaults(next);
       writeRaw(state);
       storeEvents.emit('change', state);
       return state;
-    },
-    setKey(key, value) {
-      return store.set({ keys: { [key]: value } });
     },
     reset() {
       state = mergeDefaults(null);

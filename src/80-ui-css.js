@@ -94,20 +94,6 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 .mt-root[data-open="1"] .mt-fab { transform: scale(0); opacity: 0; pointer-events: none; }
 
 .mt-fab__icon { width: 26px; height: 26px; display: block; border-radius: 6px; }
-.mt-fab__ring {
-  position: absolute;
-  inset: -3px;
-  width: calc(100% + 6px);
-  height: calc(100% + 6px);
-  transform: rotate(-90deg);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity .2s ease;
-}
-.mt-fab__ring circle { fill: none; stroke: var(--mt-accent); stroke-width: 3; stroke-linecap: round; }
-.mt-fab__track { stroke: var(--mt-border); opacity: .35; }
-.mt-root[data-busy="1"] .mt-fab__ring { opacity: 1; }
-.mt-root[data-busy="1"] .mt-fab__icon { opacity: .35; }
 
 @keyframes mt-fab-in { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
@@ -283,15 +269,145 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 }
 @keyframes mt-spin { to { transform: rotate(360deg); } }
 
-.mt-bar { height: 4px; border-radius: 2px; background: var(--mt-border); overflow: hidden; margin: 0 0 12px; }
-.mt-bar[hidden] { display: none; }
-.mt-bar__fill { height: 100%; width: 0; background: var(--mt-accent); transition: width .2s ease; }
+.mt-progress { height: 4px; border-radius: 2px; background: var(--mt-border); overflow: hidden; margin: 0 0 12px; }
+.mt-progress[hidden] { display: none; }
+.mt-progress__fill { height: 100%; width: 0; background: var(--mt-accent); transition: width .2s ease; }
 
 .mt-err { margin: 0 0 10px; color: var(--mt-danger); font-size: 13px; }
 .mt-err[hidden] { display: none; }
 
 .mt-engine-line { margin: -2px 0 10px; font-size: 11.5px; color: var(--mt-faint); }
 .mt-engine-line[hidden] { display: none; }
+
+/* ==========================================================================
+   Mobile — a fixed bottom bar mirroring TWP (Translate Web Pages):
+   [icon] [Original] [Translated] [⋯] [×], 50px tall, menu drops upward.
+   ========================================================================== */
+
+.mt-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 50px;
+  display: none;
+  align-items: center;
+  background: var(--mt-bg);
+  box-shadow: 0 -1px 5px rgba(0, 0, 0, .28);
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: auto;
+  z-index: 30;
+  padding-left: 8px;
+}
+.mt-bar[hidden] { display: none !important; }
+
+.mt-bar__icon {
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border: 0; background: transparent; cursor: pointer;
+  border-radius: 8px;
+}
+.mt-bar__icon svg { width: 30px; height: 30px; border-radius: 7px; }
+
+.mt-bar__btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 50px;
+  border: 0;
+  background: transparent;
+  color: var(--mt-fg);
+  font-family: Roboto, "Google Sans", -apple-system, "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  font-size: 17px;
+  font-weight: 500;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+.mt-bar__btn:active { background: rgba(0, 0, 0, .08); }
+.mt-root[data-theme="dark"] .mt-bar__btn:active { background: rgba(255, 255, 255, .1); }
+.mt-bar__btn[aria-pressed="true"] { color: var(--mt-accent); font-weight: 700; }
+.mt-bar__btn[disabled] { opacity: .45; }
+
+.mt-bar__more,
+.mt-bar__close {
+  flex: 0 0 auto;
+  width: 46px; height: 50px;
+  border: 0; background: transparent;
+  color: var(--mt-fg);
+  cursor: pointer;
+  display: grid; place-items: center;
+}
+.mt-bar__more[aria-expanded="true"] { background: rgba(0, 0, 0, .08); }
+.mt-bar__close { width: 40px; }
+.mt-bar__close svg, .mt-bar__more svg { width: 22px; height: 22px; }
+
+/* Dots for the overflow button, matching TWP. */
+.mt-dots { display: flex; flex-direction: column; gap: 3px; }
+.mt-dots i { display: block; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+
+.mt-bar__spin {
+  flex: 1 1 0;
+  display: none;
+  place-items: center;
+}
+.mt-root[data-busy="1"] .mt-bar__spin { display: grid; }
+.mt-spinner--bar {
+  width: 24px; height: 24px;
+  border: 3px solid rgba(0, 0, 0, .15);
+  border-top-color: var(--mt-accent);
+  border-radius: 50%;
+  animation: mt-spin .8s linear infinite;
+}
+
+/* Upward-opening menu, like TWP's .dropup-content */
+.mt-dropup {
+  position: absolute;
+  right: 0;
+  bottom: 58px;
+  min-width: 240px;
+  max-width: 78vw;
+  padding: 4px 0;
+  background: var(--mt-bg);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, .3);
+  border-radius: 8px;
+  z-index: 31;
+}
+.mt-dropup[hidden] { display: none; }
+.mt-dropup__item {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 13px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--mt-fg);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.mt-dropup__item:active { background: rgba(0, 0, 0, .08); }
+.mt-root[data-theme="dark"] .mt-dropup__item:active { background: rgba(255, 255, 255, .1); }
+.mt-dropup__item small { display: block; color: var(--mt-faint); font-size: 12px; }
+
+/* TWP draws a native <select> invisibly over the menu row. */
+.mt-dropup__select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px; /* stops iOS from zooming on focus */
+}
+
+@media (max-width: 700px), (pointer: coarse) and (max-width: 900px) {
+  .mt-bar { display: flex; }
+  .mt-fab { display: none; }
+  .mt-root[data-open="1"] .mt-fab { display: none; }
+}
 
 .mt-orig {
   display: flex;
@@ -493,66 +609,21 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 .mt-toast[hidden] { display: none; }
 @keyframes mt-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
-/* ------------------------------------------------------------- mobile */
-@media (max-width: 700px) {
-  .mt-fab { width: 48px; height: 48px; right: max(14px, env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); }
-  .mt-fab__icon { width: 23px; height: 23px; }
-  .mt-fab[hidden] { display: none; }
-
-  .mt-pop, .mt-sheet {
-    right: 0; left: 0;
-    bottom: 0;
-    width: auto;
-    max-width: none;
-    max-height: 88vh;
-    border-radius: 16px 16px 0 0;
-    padding-bottom: env(safe-area-inset-bottom);
-    transform-origin: bottom center;
-    animation: mt-sheet-in .26s cubic-bezier(.2,0,0,1);
-    overflow: hidden;
-  }
-  .mt-pop::after { display: none; }
-  @keyframes mt-sheet-in { from { transform: translateY(18px); opacity: 0; } to { transform: none; opacity: 1; } }
-
-  .mt-pop__handle {
-    display: block; width: 34px; height: 4px; margin: 8px auto 0;
-    border-radius: 2px; background: var(--mt-border);
-  }
-  .mt-row { padding: 10px 8px 4px 12px; gap: 2px; }
-  .mt-lang__btn { max-width: 38vw; height: 44px; }
-  .mt-swap, .mt-icon { width: 44px; height: 44px; }
-  .mt-body { padding: 4px 14px 0; }
-  .mt-actions { padding: 4px 12px 14px; }
-  .mt-btn { height: 46px; flex: 1 1 auto; }
-  .mt-btn--ghost, .mt-btn--quiet { flex: 0 0 auto; }
-
-  /* On phones the picker fills the whole sheet, like Chrome on Android.
-     The language group must go static so the menu anchors to the sheet
-     instead of the button. Selectors here are deliberately more specific
-     than the desktop rules above. */
-  .mt-lang { position: static; }
-  .mt-root .mt-lang[data-role] .mt-menu,
-  .mt-root .mt-pop .mt-overflow {
-    top: 0; left: 0; right: 0; bottom: 0;
-    min-width: 0; max-width: none;
-    max-height: 100%;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    border-radius: 0;
-    transform: none;
-    padding: 10px 8px 14px;
-  }
-  .mt-menu__search { height: 44px; margin-bottom: 8px; }
-  .mt-menu__list { max-height: none; }
-  .mt-menu__opt { padding: 13px 14px; }
-  .mt-sheet__body { padding: 8px 16px 20px; }
-  .mt-sheet__head { padding: 14px 6px 14px 16px; }
-  .mt-sheet__foot { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
-  .mt-pill { height: 40px; border-radius: 20px; }
+/* ------------------------------------------------------------- mobile
+   On phones the bottom bar *is* the UI (mirrors TWP), so the desktop popup
+   and settings sheet stay out of the way entirely. */
+@media (max-width: 700px), (pointer: coarse) and (max-width: 900px) {
+  .mt-pop, .mt-sheet, .mt-pill { display: none !important; }
+  .mt-toast { bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .mt-bar { padding-bottom: env(safe-area-inset-bottom); height: calc(50px + env(safe-area-inset-bottom)); }
+  .mt-dropup { bottom: calc(58px + env(safe-area-inset-bottom)); }
 }
 
-@media (min-width: 701px) {
-  .mt-pop__handle { display: none; }
+/* Very small phones: keep the two toggle labels readable. */
+@media (max-width: 360px) {
+  .mt-bar__btn { font-size: 15px; }
+  .mt-bar__more { width: 40px; }
+  .mt-bar__close { width: 36px; }
 }
 
 @media (pointer: coarse) {

@@ -124,11 +124,12 @@
       this.events.emit('start', { total: units.length });
 
       const engines = this.selectEngines(target, engineId);
-      if (!engines.length) {
-        this.busy = false;
-        this.events.emit('error', new Error(`'${target}'를 번역할 수 있는 엔진이 없습니다.`));
-        throw new Error(`'${target}'를 번역할 수 있는 엔진이 없습니다.`);
-      }
+    if (!engines.length) {
+      this.busy = false;
+      const msg = `'${target}'를 번역할 수 있는 엔진이 없습니다.`;
+      this.events.emit('error', new Error(msg));
+      throw new Error(msg);
+    }
 
       const page = translatorRef.current;
       const applied = new Set();
@@ -164,16 +165,10 @@
             let translated = null;
             let lastErr = null;
             for (const engine of engines) {
-              const keys = store.get().keys;
-              const primary = (engine.keys && engine.keys[0] && engine.keys[0].key) || null;
               try {
-                const out = await translateBatch(
-                  engine,
-                  pending.map((i) => i.text),
-                  source,
-                  target,
-                  { signal: localSignal, key: primary ? keys[primary] : undefined, extra: keys },
-                );
+                const out = await translateBatch(engine, pending.map((i) => i.text), source, target, {
+                  signal: localSignal,
+                });
                 if (!out || out.length !== pending.length) throw new Error('응답 개수 불일치');
                 translated = out;
                 this.lastEngine = engine;
@@ -182,7 +177,6 @@
               } catch (err) {
                 lastErr = err;
                 if (localSignal.aborted) throw err;
-                if (err && err.fatal) break; // bad key — do not hammer other engines
                 console.warn(`[MiriTranslator] ${engine.id} 실패:`, err && err.message);
               }
             }
@@ -222,18 +216,13 @@
       if (this.cache.has(key)) return this.cache.get(key);
       const engines = this.selectEngines(target, engineId);
       if (!engines.length) throw new Error('사용 가능한 번역 엔진이 없습니다');
-      const keys = store.get().keys;
       let lastErr;
       for (const engine of engines) {
-        const primary = (engine.keys && engine.keys[0] && engine.keys[0].key) || null;
         try {
-          const out = await engine.translate([text], source, target, {
-            signal,
-            key: primary ? keys[primary] : undefined,
-            extra: keys,
-          });
+          const out = await engine.translate([text], source, target, { signal });
           this.cache.set(key, out[0]);
           this.events.emit('engine', engine);
+          this.lastEngine = engine;
           return out[0];
         } catch (err) {
           lastErr = err;
