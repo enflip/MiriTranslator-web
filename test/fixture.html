@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Quiet Architecture of Everyday Translation</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 16px/1.7 Georgia, 'Times New Roman', serif;
+    max-width: 720px; margin: 0 auto; padding: 32px 20px 120px;
+    color: #1a1a1a; background: #fdfdfc;
+  }
+  header { border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; margin-bottom: 28px; }
+  .kicker { font: 600 12px/1 system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: #b04a2f; margin: 0 0 10px; }
+  h1 { font-size: 34px; line-height: 1.2; margin: 0 0 10px; }
+  .byline { font: 13px/1.5 system-ui, sans-serif; color: #666; margin: 0; }
+  h2 { font-size: 21px; margin: 34px 0 10px; }
+  p { margin: 0 0 18px; }
+  blockquote { border-left: 4px solid #b04a2f; margin: 24px 0; padding: 4px 0 4px 18px; font-style: italic; color: #333; }
+  figure { margin: 26px 0; }
+  figcaption { font: 12px/1.5 system-ui, sans-serif; color: #666; margin-top: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin: 26px 0; }
+  .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px 16px; background: #fff; font: 14px/1.6 system-ui, sans-serif; }
+  .card b { display: block; font-size: 15px; margin-bottom: 4px; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  code { background: #f2f0ec; padding: 2px 5px; border-radius: 4px; font: 13px/1.4 ui-monospace, monospace; }
+  .sample { background: #f7f5f1; border: 1px solid #e6e1d8; border-radius: 10px; padding: 14px 16px; font: 14px/1.7 system-ui, sans-serif; margin: 20px 0; }
+  footer { margin-top: 44px; border-top: 1px solid #ddd; padding-top: 16px; font: 13px/1.6 system-ui, sans-serif; color: #666; }
+</style>
+</head>
+<body>
+
+<header>
+  <p class="kicker">Field Notes</p>
+  <h1>The Quiet Architecture of Everyday Translation</h1>
+  <p class="byline">By Ada Whitfield · 12 August 2026 · 9 minute read</p>
+</header>
+
+<p>Every morning, millions of people ask a machine to render one thought into another language. The request looks trivial from the outside: a sentence in, a sentence out, finished before the kettle boils. What hides behind that exchange is an extraordinary amount of careful engineering.</p>
+
+<h2>Translation is a structural problem</h2>
+
+<p>Most people imagine translation as word substitution. Take an English sentence, find the equivalent noun, find the equivalent verb, and put them in the same order. That method fails the moment a sentence does anything interesting.</p>
+
+<blockquote>A sentence does not carry its meaning in a bag of words. It carries it in the relationship between them, and relationships do not survive being taken apart.</blockquote>
+
+<p>Consider the phrase <em>took the bus</em>. In many languages the bus is not the thing that is taken at all; the ride is taken. A translator who substitutes nouns mechanically will produce something grammatical and completely wrong. The work is not dictionary lookup. The work is reconstruction.</p>
+
+<h2>What a good engine actually does</h2>
+
+<div class="grid">
+  <div class="card"><b>Segmentation</b>Text is split into units that carry grammatical meaning, not arbitrary chunks of characters.</div>
+  <div class="card"><b>Context</b>Each unit is judged against the whole sentence, and increasingly against the whole document.</div>
+  <div class="card"><b>Fluency</b>The output is regenerated so that it reads like something a person would have written in the target language.</div>
+</div>
+
+<p>These three stages are the reason a good translation feels effortless. They are also the reason it is expensive. Modern systems trade accuracy for speed by shrinking the amount of context each request is allowed to carry, and users notice the seams.</p>
+
+<h2>The page as a unit</h2>
+
+<p>Translating an entire web page is harder still. A page is not a document. It is a layout with live behaviour, advertising scripts, comment threads and a dozen competing stylesheets. Any tool that works on pages must decide which parts of the page are actually worth translating.</p>
+
+<ul>
+  <li>Machine text such as code samples and identifiers should be left alone.</li>
+  <li>User-generated comments often read better untranslated, at least at first.</li>
+  <li>Numbers, dates and currency symbols usually need no help at all.</li>
+</ul>
+
+<h2>Latency is a design decision</h2>
+
+<p>A translator that takes four seconds for a whole page feels broken, even when every sentence is correct. A translator that shows the first paragraph immediately and fills in the rest feels fast, even if the total is identical.</p>
+
+<div class="sample">
+  <b>Measured on a 900-word article, residential connection:</b>
+  <ul>
+    <li>First paragraph painted: 0.4 s</li>
+    <li>Full page complete: 6.1 s</li>
+    <li>Requests issued: 23</li>
+  </ul>
+</div>
+
+<p>The important number is the first one. Progressive rendering is not a cosmetic trick; it is the difference between a tool the reader trusts and a tool they abandon.</p>
+
+<h2>What comes next</h2>
+
+<p>There is a quiet arms race underway between systems that translate one sentence at a time and systems that try to hold an entire document in mind. The latter are clearly better for literature. The former remain unbeatable for speed, cost, and privacy, because they never need to send more than a paragraph away from your machine.</p>
+
+<p>For most readers, the practical answer will not be one engine. It will be a small set of engines, chosen per page, with a clear switch to turn them off. That is what good translation tooling has always looked like: several options, one obvious button.</p>
+
+<footer>
+  <p><em>Field Notes</em> is published monthly. Comments are open to subscribers.</p>
+</footer>
+
+</body>
+</html>

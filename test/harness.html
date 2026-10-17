@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiriTranslator — harness</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  #fixture { all: initial; }
+</style>
+</head>
+<body>
+<div id="fixture"></div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * Minimal Tampermonkey shim so the userscript can run on a plain page.
+ * GM_xmlhttpRequest bypasses CORS exactly like the real thing.
+ * ------------------------------------------------------------------ */
+(function () {
+  const store = new Map();
+  window.GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+  window.GM_setValue = (k, v) => store.set(k, v);
+  window.GM_deleteValue = (k) => store.delete(k);
+  window.GM_addStyle = (css) => {
+    const s = document.createElement('style');
+    s.textContent = css;
+    document.head.appendChild(s);
+  };
+  window.GM_registerMenuCommand = (label, fn) => { (window.__menus ||= []).push({ label, fn }); };
+  window.GM_openInTab = (url) => window.open(url, '_blank');
+
+  // Routes through the local Node proxy so cross-origin calls behave the way
+  // GM_xmlhttpRequest does (no CORS restrictions).
+  window.GM_xmlhttpRequest = function (opts) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), opts.timeout || 20000);
+    const headers = {};
+    for (const [k, v] of Object.entries(opts.headers || {})) headers['x-gm-' + k] = v;
+    fetch('/__proxy?url=' + encodeURIComponent(opts.url), {
+      method: opts.method || 'GET',
+      headers,
+      body: opts.data,
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        clearTimeout(timer);
+        const payload = await res.json();
+        opts.onload && opts.onload({
+          status: payload.status,
+          responseText: payload.text,
+          responseHeaders: '',
+        });
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        if (err && err.name === 'AbortError') opts.ontimeout && opts.ontimeout();
+        else opts.onerror && opts.onerror(err);
+      });
+    return { abort: () => controller.abort() };
+  };
+})();
+</script>
+
+<script>
+/* Load the fixture markup into the page, then boot the userscript. */
+fetch('./fixture.html')
+  .then((r) => r.text())
+  .then((html) => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    document.title = doc.title;
+    document.getElementById('fixture').innerHTML = doc.body.innerHTML;
+    const style = doc.querySelector('style');
+    if (style) document.head.appendChild(style.cloneNode(true));
+    const s = document.createElement('script');
+    s.src = '../miri-translate.user.js?v=' + Date.now();
+    document.body.appendChild(s);
+  });
+</script>
+</body>
+</html>
