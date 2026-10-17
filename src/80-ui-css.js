@@ -1,4 +1,4 @@
-// ==========================================================================
+﻿// ==========================================================================
   // 80 — Styles (injected into the page, host element uses a shadow root)
 // ==========================================================================
 
@@ -280,133 +280,160 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 .mt-engine-line[hidden] { display: none; }
 
 /* ==========================================================================
-   Mobile — a fixed bottom bar mirroring TWP (Translate Web Pages):
-   [icon] [Original] [Translated] [⋯] [×], 50px tall, menu drops upward.
+   Mobile — mirrors TWP (Translate Web Pages), FilipePS/Traduzir-paginas-web:
+   a dark, horizontally-centred floating card pinned to the top (or bottom),
+   with a service selector, a two-line prompt, a gear menu, 8s auto-hide and
+   swipe-to-dismiss.
    ========================================================================== */
 
-.mt-bar {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 50px;
-  display: none;
-  align-items: center;
-  background: var(--mt-bg);
-  box-shadow: 0 -1px 5px rgba(0, 0, 0, .28);
-  user-select: none;
-  -webkit-user-select: none;
-  pointer-events: auto;
-  z-index: 30;
-  padding-left: 8px;
-}
-.mt-bar[hidden] { display: none !important; }
+.mt-mcard {
+  --m-bg: #242222;
+  --m-fg: #dadada;
+  --m-fg2: #c0c0c0;
+  --m-accent: #8ab9ff;
+  --m-shadow: #7394d3;
+  --m-hover: #434e5f;
 
-.mt-bar__icon {
+  position: absolute;
+  left: max(calc((100% - 400px) / 2), 20px);
+  right: max(calc((100% - 400px) / 2), 20px);
+  top: 0;
+  z-index: 30;
+  pointer-events: none;
+  font-family: Roboto, "Google Sans", -apple-system, "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  color: var(--m-fg);
+}
+.mt-mcard[data-pos="bottom"] { top: auto; bottom: 0; }
+.mt-mcard[hidden] { display: none; }
+
+.mt-mcard__in {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 54px;
+  padding: 0 4px;
+  background: var(--m-bg);
+  border-radius: 10px;
+  box-shadow: 0 0 5px 0 var(--m-shadow);
+  pointer-events: auto;
+  animation: mt-mcard-in .35s ease-out;
+  touch-action: pan-y;
+}
+.mt-mcard[data-pos="bottom"] .mt-mcard__in { animation-name: mt-mcard-in-up; }
+@keyframes mt-mcard-in { from { opacity: 0; transform: translateY(-50px); } to { opacity: 1; transform: none; } }
+@keyframes mt-mcard-in-up { from { opacity: 0; transform: translateY(50px); } to { opacity: 1; transform: none; } }
+
+.mt-mcard__left { display: flex; align-items: center; min-width: 0; flex: 1 1 auto; }
+
+.mt-mcard__svc {
+  position: relative;
   flex: 0 0 auto;
-  width: 40px; height: 40px;
+  width: 44px; height: 44px;
   display: grid; place-items: center;
-  border: 0; background: transparent; cursor: pointer;
+  cursor: pointer;
   border-radius: 8px;
 }
-.mt-bar__icon svg { width: 30px; height: 30px; border-radius: 7px; }
-
-.mt-bar__btn {
-  flex: 1 1 0;
-  min-width: 0;
-  height: 50px;
-  border: 0;
-  background: transparent;
-  color: var(--mt-fg);
-  font-family: Roboto, "Google Sans", -apple-system, "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
-  font-size: 17px;
-  font-weight: 500;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 4px;
-}
-.mt-bar__btn:active { background: rgba(0, 0, 0, .08); }
-.mt-root[data-theme="dark"] .mt-bar__btn:active { background: rgba(255, 255, 255, .1); }
-.mt-bar__btn[aria-pressed="true"] { color: var(--mt-accent); font-weight: 700; }
-.mt-bar__btn[disabled] { opacity: .45; }
-
-.mt-bar__more,
-.mt-bar__close {
-  flex: 0 0 auto;
-  width: 46px; height: 50px;
-  border: 0; background: transparent;
-  color: var(--mt-fg);
-  cursor: pointer;
-  display: grid; place-items: center;
-}
-.mt-bar__more[aria-expanded="true"] { background: rgba(0, 0, 0, .08); }
-.mt-bar__close { width: 40px; }
-.mt-bar__close svg, .mt-bar__more svg { width: 22px; height: 22px; }
-
-/* Dots for the overflow button, matching TWP. */
-.mt-dots { display: flex; flex-direction: column; gap: 3px; }
-.mt-dots i { display: block; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
-
-.mt-bar__spin {
-  flex: 1 1 0;
-  display: none;
-  place-items: center;
-}
-.mt-root[data-busy="1"] .mt-bar__spin { display: grid; }
-.mt-spinner--bar {
-  width: 24px; height: 24px;
-  border: 3px solid rgba(0, 0, 0, .15);
-  border-top-color: var(--mt-accent);
+.mt-mcard__svc:active { background: var(--m-hover); }
+.mt-mcard__svc > svg { width: 24px; height: 24px; border-radius: 6px; }
+.mt-spinner--card {
+  width: 22px; height: 22px;
+  border: 2.5px solid rgba(255, 255, 255, .25);
+  border-top-color: var(--m-accent);
   border-radius: 50%;
   animation: mt-spin .8s linear infinite;
 }
+.mt-mcard__svc > .mt-spinner--card { display: none; }
+.mt-root[data-busy="1"] .mt-mcard__svc > svg { display: none; }
+.mt-root[data-busy="1"] .mt-mcard__svc > .mt-spinner--card { display: block; }
+.mt-root[data-busy="1"] .mt-mcard__go { opacity: .5; pointer-events: none; }
 
-/* Upward-opening menu, like TWP's .dropup-content */
-.mt-dropup {
-  position: absolute;
-  right: 0;
-  bottom: 58px;
-  min-width: 240px;
-  max-width: 78vw;
-  padding: 4px 0;
-  background: var(--mt-bg);
-  box-shadow: 0 1px 5px rgba(0, 0, 0, .3);
-  border-radius: 8px;
-  z-index: 31;
-}
-.mt-dropup[hidden] { display: none; }
-.mt-dropup__item {
-  position: relative;
-  display: block;
-  width: 100%;
-  padding: 13px 16px;
-  border: 0;
-  background: transparent;
-  color: var(--mt-fg);
-  font: inherit;
-  font-size: 15px;
-  text-align: left;
-  cursor: pointer;
-}
-.mt-dropup__item:active { background: rgba(0, 0, 0, .08); }
-.mt-root[data-theme="dark"] .mt-dropup__item:active { background: rgba(255, 255, 255, .1); }
-.mt-dropup__item small { display: block; color: var(--mt-faint); font-size: 12px; }
-
-/* TWP draws a native <select> invisibly over the menu row. */
-.mt-dropup__select {
+/* TWP hides a native <select> on top of the row to get the platform picker. */
+.mt-mcard__select {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
+  width: 100%; height: 100%;
   opacity: 0;
+  border: 0; padding: 0;
+  font-size: 16px; /* stops iOS zooming when the picker gains focus */
   cursor: pointer;
-  font-size: 16px; /* stops iOS from zooming on focus */
+}
+
+.mt-mcard__text { display: flex; flex-direction: column; min-width: 0; padding-left: 2px; }
+.mt-mcard__q { font-size: 16px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-mcard__ft { font-size: 11px; line-height: 1.4; color: var(--m-fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.mt-mcard__right { display: flex; align-items: center; flex: 0 0 auto; }
+
+.mt-mcard__gear {
+  width: 44px; height: 44px;
+  display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--m-fg2);
+  cursor: pointer; border-radius: 8px;
+}
+.mt-mcard__gear:active { background: var(--m-hover); }
+.mt-mcard__gear svg { width: 20px; height: 20px; }
+
+.mt-mcard__vl { width: 1px; height: 18px; background: var(--m-fg2); }
+
+.mt-mcard__go {
+  min-width: 74px;
+  height: 44px;
+  padding: 0 10px;
+  border: 0; background: transparent;
+  color: var(--m-accent);
+  font-family: inherit;
+  font-size: 15px; font-weight: 500;
+  cursor: pointer; border-radius: 6px;
+  white-space: nowrap;
+}
+.mt-mcard__go:active { background: var(--m-hover); }
+
+/* Gear menu */
+.mt-mmenu {
+  position: relative;
+  margin: -5px 0 5px;
+  width: calc(100% - 56px);
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--m-bg);
+  border-radius: 10px;
+  box-shadow: 0 3px 6px 0 var(--m-shadow);
+  pointer-events: auto;
+  animation: mt-mmenu-in .18s ease-out;
+}
+@keyframes mt-mmenu-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+.mt-mmenu[hidden] { display: none; }
+
+.mt-mmenu__row {
+  position: relative;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 13px 14px;
+  font-size: 14px; line-height: 1.4;
+  color: var(--m-fg);
+  cursor: pointer;
+}
+.mt-mmenu__row:active { background: var(--m-hover); }
+.mt-mmenu__check { color: var(--m-accent); font-size: 15px; flex: 0 0 auto; }
+
+@media screen and (min-height: 600px) {
+  .mt-mcard__in { min-height: 70px; }
 }
 
 @media (max-width: 700px), (pointer: coarse) and (max-width: 900px) {
-  .mt-bar { display: flex; }
-  .mt-fab { display: none; }
-  .mt-root[data-open="1"] .mt-fab { display: none; }
+  .mt-pop, .mt-sheet, .mt-pill { display: none !important; }
+  .mt-fab { display: none !important; }
+  .mt-toast { top: 100px; bottom: auto; }
+  /* keep the settings sheet usable on a phone */
+  .mt-sheet {
+    right: 8px; left: 8px;
+    top: 88px; bottom: 8px;
+    width: auto; max-width: none;
+    max-height: none;
+  }
+  .mt-sheet::after { display: none; }
 }
 
 .mt-orig {
@@ -609,21 +636,12 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 .mt-toast[hidden] { display: none; }
 @keyframes mt-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
-/* ------------------------------------------------------------- mobile
-   On phones the bottom bar *is* the UI (mirrors TWP), so the desktop popup
-   and settings sheet stay out of the way entirely. */
-@media (max-width: 700px), (pointer: coarse) and (max-width: 900px) {
-  .mt-pop, .mt-sheet, .mt-pill { display: none !important; }
-  .mt-toast { bottom: calc(64px + env(safe-area-inset-bottom)); }
-  .mt-bar { padding-bottom: env(safe-area-inset-bottom); height: calc(50px + env(safe-area-inset-bottom)); }
-  .mt-dropup { bottom: calc(58px + env(safe-area-inset-bottom)); }
-}
-
-/* Very small phones: keep the two toggle labels readable. */
+/* Very small phones: keep the prompt readable. */
 @media (max-width: 360px) {
-  .mt-bar__btn { font-size: 15px; }
-  .mt-bar__more { width: 40px; }
-  .mt-bar__close { width: 36px; }
+  .mt-mcard__q { font-size: 15px; }
+  .mt-mcard__svc, .mt-mcard__gear { width: 40px; }
+  .mt-mcard__go { min-width: 64px; padding: 0 6px; }
+  .mt-mmenu { width: calc(100% - 28px); }
 }
 
 @media (pointer: coarse) {

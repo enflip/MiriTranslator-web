@@ -165,11 +165,19 @@
     // Reflect a detected language into the source selector once, quietly.
     (async () => {
       const s = store.get();
+      if (isMobile() && !shouldAutoTranslate()) {
+        // TWP greets you with its card when the page is not in your language.
+        const detected = await service.detect(app.sampleText());
+        if (detected && normalizeLang(detected) !== normalizeLang(s.targetLang)) {
+          service.lastDetected = detected;
+          store.set({ lastDetected: detected });
+          app.ui.showCard();
+          return;
+        }
+      }
       if (s.sourceLang === AUTO && app.sampleText().length > 80) {
         const detected = await service.detect(app.sampleText());
-        if (detected && detected !== s.targetLang) {
-          store.set({ lastDetected: detected });
-        }
+        if (detected && detected !== s.targetLang) store.set({ lastDetected: detected });
       }
     })();
 

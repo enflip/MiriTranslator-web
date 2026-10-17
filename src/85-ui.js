@@ -95,7 +95,10 @@
       this.toastTimer = null;
       this.menuOpen = null;
       this._dragY = null;
-      this.barDismissed = false;
+      this.cardDismissed = false;
+      this.cardTranslated = false;
+      this._cardTouched = 0;
+      this._cardTimer = null;
     }
 
     // ------------------------------------------------------------ mount
@@ -132,10 +135,12 @@
         bar: wrap.querySelector('.mt-progress'),
         barFill: wrap.querySelector('.mt-progress__fill'),
         engineLine: wrap.querySelector('.mt-engine-line'),
-        mobileBar: wrap.querySelector('.mt-bar'),
-        barOriginal: wrap.querySelector('[data-mbar="original"]'),
-        barTranslate: wrap.querySelector('[data-mbar="translate"]'),
-        dropup: wrap.querySelector('.mt-dropup'),
+        mobileBar: wrap.querySelector('.mt-mcard'),
+        cardQuestion: wrap.querySelector('.mt-mcard__q'),
+        cardFromTo: wrap.querySelector('.mt-mcard__ft'),
+        cardGo: wrap.querySelector('[data-mcard="go"]'),
+        cardEngine: wrap.querySelector('[data-mcard="engineSelect"]'),
+        mmenu: wrap.querySelector('.mt-mmenu'),
         err: wrap.querySelector('.mt-err'),
         orig: wrap.querySelector('.mt-orig'),
         origText: wrap.querySelector('.mt-orig__text'),
@@ -245,18 +250,28 @@
           <span>${esc(s.translate)}</span>
         </button>
 
-        <div class="mt-bar" hidden>
-          <button class="mt-bar__icon" type="button" data-mbar="popup" aria-label="${esc(s.translate)}">${ICON.translate}</button>
-          <button class="mt-bar__btn" type="button" data-mbar="original" aria-pressed="false">${esc(s.backToOriginal)}</button>
-          <button class="mt-bar__btn" type="button" data-mbar="translate">${esc(s.translate)}</button>
-          <span class="mt-bar__spin" aria-hidden="true"><span class="mt-spinner--bar"></span></span>
-          <button class="mt-bar__more" type="button" data-mbar="menu" aria-label="${esc(s.overflow)}" aria-haspopup="true" aria-expanded="false">
-            <span class="mt-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          </button>
-          <button class="mt-bar__close" type="button" data-mbar="close" aria-label="${esc(s.close)}">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-          </button>
-          <div class="mt-dropup" hidden role="menu"></div>
+        <div class="mt-mcard" hidden data-pos="top">
+          <div class="mt-mcard__in">
+            <div class="mt-mcard__left">
+              <div class="mt-mcard__svc" data-mcard="svc">
+                ${ICON.translate}
+                <span class="mt-spinner--card"></span>
+                <select class="mt-mcard__select" data-mcard="engineSelect" aria-label="${isKO ? '번역 엔진' : 'Translation engine'}"></select>
+              </div>
+              <div class="mt-mcard__text">
+                <span class="mt-mcard__q"></span>
+                <span class="mt-mcard__ft"></span>
+              </div>
+            </div>
+            <div class="mt-mcard__right">
+              <button class="mt-mcard__gear" type="button" data-mcard="menu" aria-label="${esc(s.settings)}" aria-haspopup="true" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0 0 1.88L2.83 14.5a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.3.6.22l2.39-.96c.5.37 1.03.7 1.62.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.59-.24 1.12-.57 1.62-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+              </button>
+              <span class="mt-mcard__vl"></span>
+              <button class="mt-mcard__go" type="button" data-mcard="go"></button>
+            </div>
+          </div>
+          <div class="mt-mmenu" hidden role="menu"></div>
         </div>
 
         <div class="mt-toast" role="status" hidden></div>`;
@@ -368,30 +383,35 @@
       );
       on(document, 'keydown', (e) => this.onKey(e), true);
 
-      // Mobile bottom bar (TWP style)
+      // Mobile card (TWP-style)
       on(this.el.mobileBar, 'click', (e) => {
-        const btn = e.target.closest('[data-mbar]');
+        const btn = e.target.closest('[data-mcard]');
         if (btn) {
-          const act = btn.dataset.mbar;
-          if (act === 'translate') app.translate();
-          else if (act === 'original') app.revert();
-          else if (act === 'menu') this.toggleDropup(btn);
-          else if (act === 'close') this.hideBar();
-          else if (act === 'popup') this.showSettings();
+          const act = btn.dataset.mcard;
+          if (act === 'go') {
+            if (this.cardTranslated) app.revert();
+            else app.translate();
+          } else if (act === 'menu') {
+            this.toggleMmenu(btn);
+          }
           return;
         }
-        const item = e.target.closest('[data-mact]');
-        if (!item) return;
-        if (item.tagName === 'SELECT') return; // handled by change
-        this.handleMobileAction(item.dataset.mact, item);
+        const row = e.target.closest('[data-mact]');
+        if (!row || row.tagName === 'SELECT') return;
+        this.handleMobileAction(row.dataset.mact);
       });
-      on(this.el.dropup, 'change', (e) => {
-        if (e.target.matches('[data-mact="langselect"]')) {
-          const code = e.target.value;
-          const patch = code === AUTO ? { sourceLang: AUTO } : { targetLang: code };
-          store.set(patch);
+      on(this.el.mobileBar, 'change', (e) => {
+        const sel = e.target.closest('[data-mact="langselect"], [data-mcard="engineSelect"]');
+        if (!sel) return;
+        if (sel.dataset.mcard === 'engineSelect') {
+          store.set({ engineId: sel.value });
           this.sync();
+          return;
         }
+        const code = sel.value;
+        store.set(code === AUTO ? { sourceLang: AUTO } : { targetLang: code });
+        this.sync();
+        this.renderMmenu();
       });
 
       // Selection bubble
@@ -407,6 +427,7 @@
 
       // Mobile drag-to-dismiss
       this.enableDrag();
+      this.enableCardSwipe();
 
       // Re-sync whenever settings change.
       store.on('change', () => {
@@ -467,17 +488,16 @@
       this.sync();
     }
 
-    /** Close the bar entirely (the × button). Reopen with Alt+T / the menu command. */
+    /** Close the card entirely. Reopen with Alt+T / the manager menu. */
     hideBar() {
-      this.barDismissed = true;
-      this.el.mobileBar.hidden = true;
+      this.hideCard();
     }
 
     close() {
       this.el.pop.hidden = true;
       this.el.sheet.hidden = true;
       this.el.overflow.hidden = true;
-      this.el.dropup.hidden = true;
+      this.el.mmenu.hidden = true;
       this.root.removeAttribute('data-open');
       this.hidePill();
     }
@@ -488,12 +508,8 @@
 
     toggle() {
       if (isMobile()) {
-        if (this.el.mobileBar.hidden) {
-          this.barDismissed = false;
-          this.el.mobileBar.hidden = false;
-        } else {
-          this.hideBar();
-        }
+        if (this.el.mobileBar.hidden) this.showCard();
+        else this.hideCard();
         return;
       }
       if (this.isOpen) this.close();
@@ -507,11 +523,11 @@
         g.querySelector('.mt-lang__btn').setAttribute('aria-expanded', 'false');
       }
       if (this.el.overflow) this.el.overflow.hidden = true;
-      if (this.el.dropup) this.el.dropup.hidden = true;
+      if (this.el.mmenu) this.el.mmenu.hidden = true;
       const ovBtn = this.root.querySelector('[data-act="overflow"]');
       if (ovBtn) ovBtn.setAttribute('aria-expanded', 'false');
-      const moreBtn = this.root.querySelector('[data-mbar="menu"]');
-      if (moreBtn) moreBtn.setAttribute('aria-expanded', 'false');
+      const gear = this.root.querySelector('[data-mcard="menu"]');
+      if (gear) gear.setAttribute('aria-expanded', 'false');
       this.hidePill();
     }
 
@@ -617,91 +633,206 @@
         engineLine.textContent = engine ? engine.label : '';
       }
 
-      // Mobile bar mirrors the same state.
-      this.el.mobileBar.hidden = !isMobile() || this.barDismissed;
-      this.el.barOriginal.setAttribute('aria-pressed', String(translated));
-      this.el.barTranslate.setAttribute('aria-pressed', String(busy));
-      this.el.barOriginal.disabled = !translated || busy;
-      this.el.barTranslate.disabled = busy;
+      // Mobile card mirrors the same state (TWP prompt + action button).
+      const card = this.el.mobileBar;
+      card.hidden = !isMobile() || this.cardDismissed;
+      card.setAttribute('data-pos', s.mobilePosition);
+      this.cardTranslated = translated;
+      this.el.cardQuestion.textContent = translated
+        ? (isKO ? '페이지를 번역했습니다' : 'Page translated')
+        : (isKO ? '이 페이지를 번역할까요?' : 'Translate this page?');
+      const src = s.sourceLang === AUTO ? service.lastDetected : s.sourceLang;
+      this.el.cardFromTo.textContent = isKO
+        ? `${src && src !== AUTO ? langShort(src) : '자동'} → ${langShort(s.targetLang)}`
+        : `${src && src !== AUTO ? langShort(src) : 'Auto'} → ${langShort(s.targetLang)}`;
+      this.el.cardGo.textContent = translated
+        ? (isKO ? '번역 취소' : 'Undo')
+        : (isKO ? '번역' : 'Translate');
+      const engineSel = this.el.cardEngine;
+      if (engineSel && engineSel.options.length !== ENGINES.length + 1) {
+        engineSel.innerHTML = [
+          `<option value="auto">${esc(t().engineAuto)}</option>`,
+          ...ENGINES.map((e) => `<option value="${esc(e.id)}">${esc(e.label)}</option>`),
+        ].join('');
+      }
+      if (engineSel) engineSel.value = s.engineId;
     }
 
-    // -------------------------------------------------- mobile bar (TWP)
-    toggleDropup(btn) {
-      const menu = this.el.dropup;
+    // ------------------------------------------ mobile card (TWP mirror)
+    /** Show the mobile card and start the 8s inactivity timer. */
+    showCard() {
+      if (!isMobile()) return;
+      this.cardDismissed = false;
+      this.el.mobileBar.hidden = false;
+      this.sync();
+      this.touchCard();
+      this.startCardTimer();
+    }
+
+    hideCard() {
+      this.cardDismissed = true;
+      this.el.mobileBar.hidden = true;
+      this.el.mmenu.hidden = true;
+      this.stopCardTimer();
+    }
+
+    startCardTimer() {
+      this.stopCardTimer();
+      if (store.get().mobileKeepOnScreen) return;
+      this._cardTimer = setInterval(() => {
+        if (Date.now() - this._cardTouched < 8000) return;
+        if (!this.el.mmenu.hidden) return;
+        this.hideCard();
+      }, 1000);
+    }
+
+    stopCardTimer() {
+      if (this._cardTimer) {
+        clearInterval(this._cardTimer);
+        this._cardTimer = null;
+      }
+    }
+
+    /** Any interaction resets the auto-hide countdown. */
+    touchCard() {
+      this._cardTouched = Date.now();
+    }
+
+    /** Swipe the card sideways past 20% of the viewport to dismiss it. */
+    enableCardSwipe() {
+      const card = this.el.mobileBar.querySelector('.mt-mcard__in');
+      let startX = null;
+      let dragging = false;
+
+      const onStart = (x) => {
+        startX = x;
+        dragging = true;
+        this.touchCard();
+      };
+
+      const onMove = (x) => {
+        if (!dragging || startX == null) return;
+        const dx = x - startX;
+        card.style.transform = `translateX(${dx}px)`;
+        if (Math.abs(dx) > window.innerWidth * 0.2) {
+          const dir = dx > 0 ? 1 : -1;
+          dragging = false;
+          startX = null;
+          card.style.transition = 'transform .3s ease-in-out';
+          card.style.transform = `translateX(${dir * 100}%)`;
+          let gone = false;
+          const done = () => {
+            if (gone) return;
+            gone = true;
+            card.style.cssText = '';
+            this.hideCard();
+          };
+          card.addEventListener('transitionend', done, { once: true });
+          setTimeout(done, 400);
+        }
+      };
+
+      const onEnd = () => {
+        if (startX != null) {
+          card.style.transition = 'transform .2s ease-out';
+          card.style.transform = '';
+        }
+        dragging = false;
+        startX = null;
+        this.touchCard();
+      };
+
+      card.addEventListener('mousedown', (ev) => {
+        if (ev.target === card) onStart(ev.clientX);
+      });
+      card.addEventListener('mousemove', (ev) => {
+        if (ev.target === card) onMove(ev.clientX);
+      });
+      card.addEventListener('mouseup', (ev) => {
+        if (ev.target === card) onEnd(ev.clientX);
+      });
+      card.addEventListener('touchstart', (ev) => onStart(ev.touches[0].clientX), { passive: true });
+      card.addEventListener('touchmove', (ev) => onMove(ev.touches[0].clientX), { passive: true });
+      card.addEventListener('touchend', () => onEnd(), { passive: true });
+      card.addEventListener('touchcancel', () => onEnd(), { passive: true });
+    }
+
+    toggleMmenu(btn) {
+      const menu = this.el.mmenu;
       const wasHidden = menu.hidden;
-      this.dismissMenus();
+      this.touchCard();
       if (wasHidden) {
-        const s = store.get();
-        const host = hostOf(location.href);
-        const langs = listLanguages();
-        const options = [`<option value="${AUTO}"${s.sourceLang === AUTO ? ' selected' : ''}>${esc(t().detect)}</option>`]
-          .concat(
-            langs.map(
-              (l) =>
-                `<option value="${esc(l.code)}"${l.code === s.targetLang ? ' selected' : ''}>${esc(`${l.flag} ${l.native} (${l.en})`)}</option>`,
-            ),
-          )
-          .join('');
-        menu.innerHTML = `
-          <button class="mt-dropup__item" type="button" data-mact="language">
-            ${isKO ? '번역 언어 변경' : 'Choose another language'}
-            <small>${esc(langShort(s.targetLang))}</small>
-            <select class="mt-dropup__select" data-mact="langselect">${options}</select>
-          </button>
-          <button class="mt-dropup__item" type="button" data-mact="engine">
-            ${isKO ? '번역 엔진' : 'Translation engine'}
-            <small>${esc(s.engineId === 'auto' ? t().engineAuto : (ENGINE_BY_ID.get(s.engineId) || {}).label || s.engineId)}</small>
-          </button>
-          <button class="mt-dropup__item" type="button" data-mact="selection">
-            ${isKO ? '드래그 번역' : 'Translate selected text'}
-            <small>${s.selectionBubble ? (isKO ? '켜짐' : 'On') : (isKO ? '꺼짐' : 'Off')}</small>
-          </button>
-          <button class="mt-dropup__item" type="button" data-mact="never">
-            ${isKO ? '이 사이트 번역 안 함' : 'Never translate this site'}
-            <small>${esc(host)}</small>
-          </button>
-          <button class="mt-dropup__item" type="button" data-mact="settings">${isKO ? '설정' : 'More options'}</button>`;
+        this.renderMmenu();
         menu.hidden = false;
         btn.setAttribute('aria-expanded', 'true');
       }
     }
 
-    handleMobileAction(action, node) {
+    renderMmenu() {
       const s = store.get();
-      if (action === 'language') return; // the native <select> handles it
+      const host = hostOf(location.href);
+      const langs = listLanguages();
+      const check = (on) => `<span class="mt-mmenu__check">${on ? '✔' : ''}</span>`;
+      const langOptions = [`<option value="${AUTO}"${s.sourceLang === AUTO ? ' selected' : ''}>${esc(t().detect)}</option>`]
+        .concat(
+          langs.map(
+            (l) =>
+              `<option value="${esc(l.code)}"${l.code === s.targetLang ? ' selected' : ''}>${esc(`${l.flag} ${l.native} (${l.en})`)}</option>`,
+          ),
+        )
+        .join('');
+      this.el.mmenu.innerHTML = `
+        <div class="mt-mmenu__row" data-mact="language">
+          <span>${isKO ? '다른 언어 선택' : 'Choose another language'}</span>
+          <select class="mt-mcard__select" data-mact="langselect" aria-label="${isKO ? '번역 언어' : 'Translate into'}">${langOptions}</select>
+        </div>
+        <div class="mt-mmenu__row" data-mact="never">
+          <span>${isKO ? '이 사이트는 번역 안 함' : 'Never translate this site'}</span>
+          ${check(matchesList(host, s.neverSites))}
+        </div>
+        <div class="mt-mmenu__row" data-mact="selection">
+          <span>${isKO ? '선택 문장 번역 버튼 표시' : 'Show the button to translate the selected text'}</span>
+          ${check(s.selectionBubble)}
+        </div>
+        <div class="mt-mmenu__row" data-mact="keep">
+          <span>${isKO ? '화면에 계속 띄워두기' : 'Keep on screen'}</span>
+          ${check(s.mobileKeepOnScreen)}
+        </div>
+        <div class="mt-mmenu__row" data-mact="position">
+          <span>${isKO ? '위치 변경' : 'Change position'}</span>
+          <span class="mt-mmenu__check">${s.mobilePosition === 'top' ? (isKO ? '위' : 'Top') : (isKO ? '아래' : 'Bottom')}</span>
+        </div>
+        <div class="mt-mmenu__row" data-mact="settings">
+          <span>${isKO ? '설정' : 'More options'}</span>
+        </div>`;
+    }
+
+    handleMobileAction(action) {
+      const s = store.get();
+      const host = hostOf(location.href);
       if (action === 'settings') {
-        this.dismissMenus();
+        this.hideCard();
         this.showSettings();
         return;
       }
       if (action === 'selection') {
         store.set({ selectionBubble: !s.selectionBubble });
-        this.toast(store.get().selectionBubble ? (isKO ? '드래그 번역을 켰습니다.' : 'Selection translation on') : (isKO ? '드래그 번역을 껐습니다.' : 'Selection translation off'));
+      } else if (action === 'keep') {
+        store.set({ mobileKeepOnScreen: !s.mobileKeepOnScreen });
+        if (!store.get().mobileKeepOnScreen) this.startCardTimer();
+        else this.stopCardTimer();
+      } else if (action === 'position') {
+        store.set({ mobilePosition: store.get().mobilePosition === 'top' ? 'bottom' : 'top' });
+        this.touchCard();
       } else if (action === 'never') {
-        const host = hostOf(location.href);
         const next = Array.isArray(s.neverSites) ? s.neverSites.slice() : [];
         const idx = next.findIndex((x) => hostOf(x) === host);
         if (idx === -1) next.push(host);
         else next.splice(idx, 1);
         store.set({ neverSites: next });
-        this.toast(
-          matchesList(host, store.get().neverSites)
-            ? (isKO ? '이 사이트를 번역 목록에서 제외했습니다.' : 'Site excluded')
-            : (isKO ? '이 사이트를 다시 번역합니다.' : 'Site included again'),
-        );
-      } else if (action === 'engine') {
-        const ids = ['auto', ...ENGINES.map((e) => e.id)];
-        const cur = s.engineId === 'auto' ? 0 : ids.indexOf(s.engineId);
-        const nextId = ids[(cur + 1) % ids.length];
-        store.set({ engineId: nextId });
-        this.toast(
-          nextId === 'auto'
-            ? t().engineAuto
-            : `${(ENGINE_BY_ID.get(nextId) || {}).label || nextId}`,
-        );
+        this.touchCard();
       }
-      const moreBtn = this.root.querySelector('[data-mbar="menu"]');
-      this.toggleDropup(moreBtn);
+      this.renderMmenu();
     }
 
     setProgress(done, total) {

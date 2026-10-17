@@ -3,7 +3,7 @@
 // @name:en      MiriTranslator — Webpage Translator (Chrome-style)
 // @name:ko      MiriTranslator — 웹페이지 번역
 // @namespace    https://github.com/enflip/MiriTranslator-web
-// @version      1.0.0
+// @version      1.1.0
 // @description  크롬 기본 번역 기능과 같은 UX로 웹페이지를 번역합니다. 키가 필요 없는 무료 API(구글, 파파고, DeepL, MyMemory, Reverso)를 기본 지원하고, DeepL·Microsoft·Papago Cloud·Google Cloud·LibreTranslate 같은 무료 티어 API 키도 입력할 수 있습니다.
 // @description:en Translates web pages with a Chrome-like UI. Ships with keyless free APIs (Google, Papago, DeepL, MyMemory, Reverso) and supports optional free-tier API keys (DeepL, Microsoft, Papago Cloud, Google Cloud, LibreTranslate).
 // @author       enflip
@@ -16,6 +16,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @updateURL    https://raw.githubusercontent.com/enflip/MiriTranslator-web/main/miri-translate.user.js
+// @downloadURL  https://raw.githubusercontent.com/enflip/MiriTranslator-web/main/miri-translate.user.js
 // ==/UserScript==
 
 /* eslint-disable no-undef */
@@ -24,7 +26,7 @@
 
   const APP = {
     name: 'MiriTranslator',
-    version: '1.0.0',
+    version: '1.1.0',
     homepage: 'https://github.com/enflip/MiriTranslator-web',
   };
 

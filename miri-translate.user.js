@@ -15,7 +15,7 @@
 // @name:en      MiriTranslator — Webpage Translator (Chrome-style)
 // @name:ko      MiriTranslator — 웹페이지 번역
 // @namespace    https://github.com/enflip/MiriTranslator-web
-// @version      1.0.0
+// @version      1.1.0
 // @description  크롬 기본 번역 기능과 같은 UX로 웹페이지를 번역합니다. 키가 필요 없는 무료 API(구글, 파파고, DeepL, MyMemory, Reverso)를 기본 지원하고, DeepL·Microsoft·Papago Cloud·Google Cloud·LibreTranslate 같은 무료 티어 API 키도 입력할 수 있습니다.
 // @description:en Translates web pages with a Chrome-like UI. Ships with keyless free APIs (Google, Papago, DeepL, MyMemory, Reverso) and supports optional free-tier API keys (DeepL, Microsoft, Papago Cloud, Google Cloud, LibreTranslate).
 // @author       enflip
@@ -28,6 +28,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @updateURL    https://raw.githubusercontent.com/enflip/MiriTranslator-web/main/miri-translate.user.js
+// @downloadURL  https://raw.githubusercontent.com/enflip/MiriTranslator-web/main/miri-translate.user.js
 // ==/UserScript==
 
 /* eslint-disable no-undef */
@@ -36,7 +38,7 @@
 
   const APP = {
     name: 'MiriTranslator',
-    version: '1.0.0',
+    version: '1.1.0',
     homepage: 'https://github.com/enflip/MiriTranslator-web',
   };
 
@@ -947,6 +949,10 @@
     neverSites: [],
     /** Floating button visibility — off by default; the shortcut opens the popup. */
     showFab: false,
+    /** Mobile card position: top | bottom (TWP-style). */
+    mobilePosition: 'top',
+    /** Keep the mobile card on screen instead of auto-hiding after 8s. */
+    mobileKeepOnScreen: false,
     /** auto | light | dark */
     theme: 'auto',
     /** Selection bubble. */
@@ -1762,7 +1768,7 @@
   };
 
 /* ==== src/80-ui-css.js ============================================== */
-// ==========================================================================
+﻿// ==========================================================================
   // 80 — Styles (injected into the page, host element uses a shadow root)
 // ==========================================================================
 
@@ -2044,133 +2050,160 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 .mt-engine-line[hidden] { display: none; }
 
 /* ==========================================================================
-   Mobile — a fixed bottom bar mirroring TWP (Translate Web Pages):
-   [icon] [Original] [Translated] [⋯] [×], 50px tall, menu drops upward.
+   Mobile — mirrors TWP (Translate Web Pages), FilipePS/Traduzir-paginas-web:
+   a dark, horizontally-centred floating card pinned to the top (or bottom),
+   with a service selector, a two-line prompt, a gear menu, 8s auto-hide and
+   swipe-to-dismiss.
    ========================================================================== */
 
-.mt-bar {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 50px;
-  display: none;
-  align-items: center;
-  background: var(--mt-bg);
-  box-shadow: 0 -1px 5px rgba(0, 0, 0, .28);
-  user-select: none;
-  -webkit-user-select: none;
-  pointer-events: auto;
-  z-index: 30;
-  padding-left: 8px;
-}
-.mt-bar[hidden] { display: none !important; }
+.mt-mcard {
+  --m-bg: #242222;
+  --m-fg: #dadada;
+  --m-fg2: #c0c0c0;
+  --m-accent: #8ab9ff;
+  --m-shadow: #7394d3;
+  --m-hover: #434e5f;
 
-.mt-bar__icon {
+  position: absolute;
+  left: max(calc((100% - 400px) / 2), 20px);
+  right: max(calc((100% - 400px) / 2), 20px);
+  top: 0;
+  z-index: 30;
+  pointer-events: none;
+  font-family: Roboto, "Google Sans", -apple-system, "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  color: var(--m-fg);
+}
+.mt-mcard[data-pos="bottom"] { top: auto; bottom: 0; }
+.mt-mcard[hidden] { display: none; }
+
+.mt-mcard__in {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 54px;
+  padding: 0 4px;
+  background: var(--m-bg);
+  border-radius: 10px;
+  box-shadow: 0 0 5px 0 var(--m-shadow);
+  pointer-events: auto;
+  animation: mt-mcard-in .35s ease-out;
+  touch-action: pan-y;
+}
+.mt-mcard[data-pos="bottom"] .mt-mcard__in { animation-name: mt-mcard-in-up; }
+@keyframes mt-mcard-in { from { opacity: 0; transform: translateY(-50px); } to { opacity: 1; transform: none; } }
+@keyframes mt-mcard-in-up { from { opacity: 0; transform: translateY(50px); } to { opacity: 1; transform: none; } }
+
+.mt-mcard__left { display: flex; align-items: center; min-width: 0; flex: 1 1 auto; }
+
+.mt-mcard__svc {
+  position: relative;
   flex: 0 0 auto;
-  width: 40px; height: 40px;
+  width: 44px; height: 44px;
   display: grid; place-items: center;
-  border: 0; background: transparent; cursor: pointer;
+  cursor: pointer;
   border-radius: 8px;
 }
-.mt-bar__icon svg { width: 30px; height: 30px; border-radius: 7px; }
-
-.mt-bar__btn {
-  flex: 1 1 0;
-  min-width: 0;
-  height: 50px;
-  border: 0;
-  background: transparent;
-  color: var(--mt-fg);
-  font-family: Roboto, "Google Sans", -apple-system, "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
-  font-size: 17px;
-  font-weight: 500;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 4px;
-}
-.mt-bar__btn:active { background: rgba(0, 0, 0, .08); }
-.mt-root[data-theme="dark"] .mt-bar__btn:active { background: rgba(255, 255, 255, .1); }
-.mt-bar__btn[aria-pressed="true"] { color: var(--mt-accent); font-weight: 700; }
-.mt-bar__btn[disabled] { opacity: .45; }
-
-.mt-bar__more,
-.mt-bar__close {
-  flex: 0 0 auto;
-  width: 46px; height: 50px;
-  border: 0; background: transparent;
-  color: var(--mt-fg);
-  cursor: pointer;
-  display: grid; place-items: center;
-}
-.mt-bar__more[aria-expanded="true"] { background: rgba(0, 0, 0, .08); }
-.mt-bar__close { width: 40px; }
-.mt-bar__close svg, .mt-bar__more svg { width: 22px; height: 22px; }
-
-/* Dots for the overflow button, matching TWP. */
-.mt-dots { display: flex; flex-direction: column; gap: 3px; }
-.mt-dots i { display: block; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
-
-.mt-bar__spin {
-  flex: 1 1 0;
-  display: none;
-  place-items: center;
-}
-.mt-root[data-busy="1"] .mt-bar__spin { display: grid; }
-.mt-spinner--bar {
-  width: 24px; height: 24px;
-  border: 3px solid rgba(0, 0, 0, .15);
-  border-top-color: var(--mt-accent);
+.mt-mcard__svc:active { background: var(--m-hover); }
+.mt-mcard__svc > svg { width: 24px; height: 24px; border-radius: 6px; }
+.mt-spinner--card {
+  width: 22px; height: 22px;
+  border: 2.5px solid rgba(255, 255, 255, .25);
+  border-top-color: var(--m-accent);
   border-radius: 50%;
   animation: mt-spin .8s linear infinite;
 }
+.mt-mcard__svc > .mt-spinner--card { display: none; }
+.mt-root[data-busy="1"] .mt-mcard__svc > svg { display: none; }
+.mt-root[data-busy="1"] .mt-mcard__svc > .mt-spinner--card { display: block; }
+.mt-root[data-busy="1"] .mt-mcard__go { opacity: .5; pointer-events: none; }
 
-/* Upward-opening menu, like TWP's .dropup-content */
-.mt-dropup {
-  position: absolute;
-  right: 0;
-  bottom: 58px;
-  min-width: 240px;
-  max-width: 78vw;
-  padding: 4px 0;
-  background: var(--mt-bg);
-  box-shadow: 0 1px 5px rgba(0, 0, 0, .3);
-  border-radius: 8px;
-  z-index: 31;
-}
-.mt-dropup[hidden] { display: none; }
-.mt-dropup__item {
-  position: relative;
-  display: block;
-  width: 100%;
-  padding: 13px 16px;
-  border: 0;
-  background: transparent;
-  color: var(--mt-fg);
-  font: inherit;
-  font-size: 15px;
-  text-align: left;
-  cursor: pointer;
-}
-.mt-dropup__item:active { background: rgba(0, 0, 0, .08); }
-.mt-root[data-theme="dark"] .mt-dropup__item:active { background: rgba(255, 255, 255, .1); }
-.mt-dropup__item small { display: block; color: var(--mt-faint); font-size: 12px; }
-
-/* TWP draws a native <select> invisibly over the menu row. */
-.mt-dropup__select {
+/* TWP hides a native <select> on top of the row to get the platform picker. */
+.mt-mcard__select {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
+  width: 100%; height: 100%;
   opacity: 0;
+  border: 0; padding: 0;
+  font-size: 16px; /* stops iOS zooming when the picker gains focus */
   cursor: pointer;
-  font-size: 16px; /* stops iOS from zooming on focus */
+}
+
+.mt-mcard__text { display: flex; flex-direction: column; min-width: 0; padding-left: 2px; }
+.mt-mcard__q { font-size: 16px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-mcard__ft { font-size: 11px; line-height: 1.4; color: var(--m-fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.mt-mcard__right { display: flex; align-items: center; flex: 0 0 auto; }
+
+.mt-mcard__gear {
+  width: 44px; height: 44px;
+  display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--m-fg2);
+  cursor: pointer; border-radius: 8px;
+}
+.mt-mcard__gear:active { background: var(--m-hover); }
+.mt-mcard__gear svg { width: 20px; height: 20px; }
+
+.mt-mcard__vl { width: 1px; height: 18px; background: var(--m-fg2); }
+
+.mt-mcard__go {
+  min-width: 74px;
+  height: 44px;
+  padding: 0 10px;
+  border: 0; background: transparent;
+  color: var(--m-accent);
+  font-family: inherit;
+  font-size: 15px; font-weight: 500;
+  cursor: pointer; border-radius: 6px;
+  white-space: nowrap;
+}
+.mt-mcard__go:active { background: var(--m-hover); }
+
+/* Gear menu */
+.mt-mmenu {
+  position: relative;
+  margin: -5px 0 5px;
+  width: calc(100% - 56px);
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--m-bg);
+  border-radius: 10px;
+  box-shadow: 0 3px 6px 0 var(--m-shadow);
+  pointer-events: auto;
+  animation: mt-mmenu-in .18s ease-out;
+}
+@keyframes mt-mmenu-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+.mt-mmenu[hidden] { display: none; }
+
+.mt-mmenu__row {
+  position: relative;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 13px 14px;
+  font-size: 14px; line-height: 1.4;
+  color: var(--m-fg);
+  cursor: pointer;
+}
+.mt-mmenu__row:active { background: var(--m-hover); }
+.mt-mmenu__check { color: var(--m-accent); font-size: 15px; flex: 0 0 auto; }
+
+@media screen and (min-height: 600px) {
+  .mt-mcard__in { min-height: 70px; }
 }
 
 @media (max-width: 700px), (pointer: coarse) and (max-width: 900px) {
-  .mt-bar { display: flex; }
-  .mt-fab { display: none; }
-  .mt-root[data-open="1"] .mt-fab { display: none; }
+  .mt-pop, .mt-sheet, .mt-pill { display: none !important; }
+  .mt-fab { display: none !important; }
+  .mt-toast { top: 100px; bottom: auto; }
+  /* keep the settings sheet usable on a phone */
+  .mt-sheet {
+    right: 8px; left: 8px;
+    top: 88px; bottom: 8px;
+    width: auto; max-width: none;
+    max-height: none;
+  }
+  .mt-sheet::after { display: none; }
 }
 
 .mt-orig {
@@ -2373,21 +2406,12 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 .mt-toast[hidden] { display: none; }
 @keyframes mt-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
-/* ------------------------------------------------------------- mobile
-   On phones the bottom bar *is* the UI (mirrors TWP), so the desktop popup
-   and settings sheet stay out of the way entirely. */
-@media (max-width: 700px), (pointer: coarse) and (max-width: 900px) {
-  .mt-pop, .mt-sheet, .mt-pill { display: none !important; }
-  .mt-toast { bottom: calc(64px + env(safe-area-inset-bottom)); }
-  .mt-bar { padding-bottom: env(safe-area-inset-bottom); height: calc(50px + env(safe-area-inset-bottom)); }
-  .mt-dropup { bottom: calc(58px + env(safe-area-inset-bottom)); }
-}
-
-/* Very small phones: keep the two toggle labels readable. */
+/* Very small phones: keep the prompt readable. */
 @media (max-width: 360px) {
-  .mt-bar__btn { font-size: 15px; }
-  .mt-bar__more { width: 40px; }
-  .mt-bar__close { width: 36px; }
+  .mt-mcard__q { font-size: 15px; }
+  .mt-mcard__svc, .mt-mcard__gear { width: 40px; }
+  .mt-mcard__go { min-width: 64px; padding: 0 6px; }
+  .mt-mmenu { width: calc(100% - 28px); }
 }
 
 @media (pointer: coarse) {
@@ -2497,7 +2521,10 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
       this.toastTimer = null;
       this.menuOpen = null;
       this._dragY = null;
-      this.barDismissed = false;
+      this.cardDismissed = false;
+      this.cardTranslated = false;
+      this._cardTouched = 0;
+      this._cardTimer = null;
     }
 
     // ------------------------------------------------------------ mount
@@ -2534,10 +2561,12 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
         bar: wrap.querySelector('.mt-progress'),
         barFill: wrap.querySelector('.mt-progress__fill'),
         engineLine: wrap.querySelector('.mt-engine-line'),
-        mobileBar: wrap.querySelector('.mt-bar'),
-        barOriginal: wrap.querySelector('[data-mbar="original"]'),
-        barTranslate: wrap.querySelector('[data-mbar="translate"]'),
-        dropup: wrap.querySelector('.mt-dropup'),
+        mobileBar: wrap.querySelector('.mt-mcard'),
+        cardQuestion: wrap.querySelector('.mt-mcard__q'),
+        cardFromTo: wrap.querySelector('.mt-mcard__ft'),
+        cardGo: wrap.querySelector('[data-mcard="go"]'),
+        cardEngine: wrap.querySelector('[data-mcard="engineSelect"]'),
+        mmenu: wrap.querySelector('.mt-mmenu'),
         err: wrap.querySelector('.mt-err'),
         orig: wrap.querySelector('.mt-orig'),
         origText: wrap.querySelector('.mt-orig__text'),
@@ -2647,18 +2676,28 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
           <span>${esc(s.translate)}</span>
         </button>
 
-        <div class="mt-bar" hidden>
-          <button class="mt-bar__icon" type="button" data-mbar="popup" aria-label="${esc(s.translate)}">${ICON.translate}</button>
-          <button class="mt-bar__btn" type="button" data-mbar="original" aria-pressed="false">${esc(s.backToOriginal)}</button>
-          <button class="mt-bar__btn" type="button" data-mbar="translate">${esc(s.translate)}</button>
-          <span class="mt-bar__spin" aria-hidden="true"><span class="mt-spinner--bar"></span></span>
-          <button class="mt-bar__more" type="button" data-mbar="menu" aria-label="${esc(s.overflow)}" aria-haspopup="true" aria-expanded="false">
-            <span class="mt-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          </button>
-          <button class="mt-bar__close" type="button" data-mbar="close" aria-label="${esc(s.close)}">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-          </button>
-          <div class="mt-dropup" hidden role="menu"></div>
+        <div class="mt-mcard" hidden data-pos="top">
+          <div class="mt-mcard__in">
+            <div class="mt-mcard__left">
+              <div class="mt-mcard__svc" data-mcard="svc">
+                ${ICON.translate}
+                <span class="mt-spinner--card"></span>
+                <select class="mt-mcard__select" data-mcard="engineSelect" aria-label="${isKO ? '번역 엔진' : 'Translation engine'}"></select>
+              </div>
+              <div class="mt-mcard__text">
+                <span class="mt-mcard__q"></span>
+                <span class="mt-mcard__ft"></span>
+              </div>
+            </div>
+            <div class="mt-mcard__right">
+              <button class="mt-mcard__gear" type="button" data-mcard="menu" aria-label="${esc(s.settings)}" aria-haspopup="true" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0 0 1.88L2.83 14.5a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.3.6.22l2.39-.96c.5.37 1.03.7 1.62.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.59-.24 1.12-.57 1.62-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+              </button>
+              <span class="mt-mcard__vl"></span>
+              <button class="mt-mcard__go" type="button" data-mcard="go"></button>
+            </div>
+          </div>
+          <div class="mt-mmenu" hidden role="menu"></div>
         </div>
 
         <div class="mt-toast" role="status" hidden></div>`;
@@ -2770,30 +2809,35 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
       );
       on(document, 'keydown', (e) => this.onKey(e), true);
 
-      // Mobile bottom bar (TWP style)
+      // Mobile card (TWP-style)
       on(this.el.mobileBar, 'click', (e) => {
-        const btn = e.target.closest('[data-mbar]');
+        const btn = e.target.closest('[data-mcard]');
         if (btn) {
-          const act = btn.dataset.mbar;
-          if (act === 'translate') app.translate();
-          else if (act === 'original') app.revert();
-          else if (act === 'menu') this.toggleDropup(btn);
-          else if (act === 'close') this.hideBar();
-          else if (act === 'popup') this.showSettings();
+          const act = btn.dataset.mcard;
+          if (act === 'go') {
+            if (this.cardTranslated) app.revert();
+            else app.translate();
+          } else if (act === 'menu') {
+            this.toggleMmenu(btn);
+          }
           return;
         }
-        const item = e.target.closest('[data-mact]');
-        if (!item) return;
-        if (item.tagName === 'SELECT') return; // handled by change
-        this.handleMobileAction(item.dataset.mact, item);
+        const row = e.target.closest('[data-mact]');
+        if (!row || row.tagName === 'SELECT') return;
+        this.handleMobileAction(row.dataset.mact);
       });
-      on(this.el.dropup, 'change', (e) => {
-        if (e.target.matches('[data-mact="langselect"]')) {
-          const code = e.target.value;
-          const patch = code === AUTO ? { sourceLang: AUTO } : { targetLang: code };
-          store.set(patch);
+      on(this.el.mobileBar, 'change', (e) => {
+        const sel = e.target.closest('[data-mact="langselect"], [data-mcard="engineSelect"]');
+        if (!sel) return;
+        if (sel.dataset.mcard === 'engineSelect') {
+          store.set({ engineId: sel.value });
           this.sync();
+          return;
         }
+        const code = sel.value;
+        store.set(code === AUTO ? { sourceLang: AUTO } : { targetLang: code });
+        this.sync();
+        this.renderMmenu();
       });
 
       // Selection bubble
@@ -2809,6 +2853,7 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 
       // Mobile drag-to-dismiss
       this.enableDrag();
+      this.enableCardSwipe();
 
       // Re-sync whenever settings change.
       store.on('change', () => {
@@ -2869,17 +2914,16 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
       this.sync();
     }
 
-    /** Close the bar entirely (the × button). Reopen with Alt+T / the menu command. */
+    /** Close the card entirely. Reopen with Alt+T / the manager menu. */
     hideBar() {
-      this.barDismissed = true;
-      this.el.mobileBar.hidden = true;
+      this.hideCard();
     }
 
     close() {
       this.el.pop.hidden = true;
       this.el.sheet.hidden = true;
       this.el.overflow.hidden = true;
-      this.el.dropup.hidden = true;
+      this.el.mmenu.hidden = true;
       this.root.removeAttribute('data-open');
       this.hidePill();
     }
@@ -2890,12 +2934,8 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
 
     toggle() {
       if (isMobile()) {
-        if (this.el.mobileBar.hidden) {
-          this.barDismissed = false;
-          this.el.mobileBar.hidden = false;
-        } else {
-          this.hideBar();
-        }
+        if (this.el.mobileBar.hidden) this.showCard();
+        else this.hideCard();
         return;
       }
       if (this.isOpen) this.close();
@@ -2909,11 +2949,11 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
         g.querySelector('.mt-lang__btn').setAttribute('aria-expanded', 'false');
       }
       if (this.el.overflow) this.el.overflow.hidden = true;
-      if (this.el.dropup) this.el.dropup.hidden = true;
+      if (this.el.mmenu) this.el.mmenu.hidden = true;
       const ovBtn = this.root.querySelector('[data-act="overflow"]');
       if (ovBtn) ovBtn.setAttribute('aria-expanded', 'false');
-      const moreBtn = this.root.querySelector('[data-mbar="menu"]');
-      if (moreBtn) moreBtn.setAttribute('aria-expanded', 'false');
+      const gear = this.root.querySelector('[data-mcard="menu"]');
+      if (gear) gear.setAttribute('aria-expanded', 'false');
       this.hidePill();
     }
 
@@ -3019,91 +3059,206 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
         engineLine.textContent = engine ? engine.label : '';
       }
 
-      // Mobile bar mirrors the same state.
-      this.el.mobileBar.hidden = !isMobile() || this.barDismissed;
-      this.el.barOriginal.setAttribute('aria-pressed', String(translated));
-      this.el.barTranslate.setAttribute('aria-pressed', String(busy));
-      this.el.barOriginal.disabled = !translated || busy;
-      this.el.barTranslate.disabled = busy;
+      // Mobile card mirrors the same state (TWP prompt + action button).
+      const card = this.el.mobileBar;
+      card.hidden = !isMobile() || this.cardDismissed;
+      card.setAttribute('data-pos', s.mobilePosition);
+      this.cardTranslated = translated;
+      this.el.cardQuestion.textContent = translated
+        ? (isKO ? '페이지를 번역했습니다' : 'Page translated')
+        : (isKO ? '이 페이지를 번역할까요?' : 'Translate this page?');
+      const src = s.sourceLang === AUTO ? service.lastDetected : s.sourceLang;
+      this.el.cardFromTo.textContent = isKO
+        ? `${src && src !== AUTO ? langShort(src) : '자동'} → ${langShort(s.targetLang)}`
+        : `${src && src !== AUTO ? langShort(src) : 'Auto'} → ${langShort(s.targetLang)}`;
+      this.el.cardGo.textContent = translated
+        ? (isKO ? '번역 취소' : 'Undo')
+        : (isKO ? '번역' : 'Translate');
+      const engineSel = this.el.cardEngine;
+      if (engineSel && engineSel.options.length !== ENGINES.length + 1) {
+        engineSel.innerHTML = [
+          `<option value="auto">${esc(t().engineAuto)}</option>`,
+          ...ENGINES.map((e) => `<option value="${esc(e.id)}">${esc(e.label)}</option>`),
+        ].join('');
+      }
+      if (engineSel) engineSel.value = s.engineId;
     }
 
-    // -------------------------------------------------- mobile bar (TWP)
-    toggleDropup(btn) {
-      const menu = this.el.dropup;
+    // ------------------------------------------ mobile card (TWP mirror)
+    /** Show the mobile card and start the 8s inactivity timer. */
+    showCard() {
+      if (!isMobile()) return;
+      this.cardDismissed = false;
+      this.el.mobileBar.hidden = false;
+      this.sync();
+      this.touchCard();
+      this.startCardTimer();
+    }
+
+    hideCard() {
+      this.cardDismissed = true;
+      this.el.mobileBar.hidden = true;
+      this.el.mmenu.hidden = true;
+      this.stopCardTimer();
+    }
+
+    startCardTimer() {
+      this.stopCardTimer();
+      if (store.get().mobileKeepOnScreen) return;
+      this._cardTimer = setInterval(() => {
+        if (Date.now() - this._cardTouched < 8000) return;
+        if (!this.el.mmenu.hidden) return;
+        this.hideCard();
+      }, 1000);
+    }
+
+    stopCardTimer() {
+      if (this._cardTimer) {
+        clearInterval(this._cardTimer);
+        this._cardTimer = null;
+      }
+    }
+
+    /** Any interaction resets the auto-hide countdown. */
+    touchCard() {
+      this._cardTouched = Date.now();
+    }
+
+    /** Swipe the card sideways past 20% of the viewport to dismiss it. */
+    enableCardSwipe() {
+      const card = this.el.mobileBar.querySelector('.mt-mcard__in');
+      let startX = null;
+      let dragging = false;
+
+      const onStart = (x) => {
+        startX = x;
+        dragging = true;
+        this.touchCard();
+      };
+
+      const onMove = (x) => {
+        if (!dragging || startX == null) return;
+        const dx = x - startX;
+        card.style.transform = `translateX(${dx}px)`;
+        if (Math.abs(dx) > window.innerWidth * 0.2) {
+          const dir = dx > 0 ? 1 : -1;
+          dragging = false;
+          startX = null;
+          card.style.transition = 'transform .3s ease-in-out';
+          card.style.transform = `translateX(${dir * 100}%)`;
+          let gone = false;
+          const done = () => {
+            if (gone) return;
+            gone = true;
+            card.style.cssText = '';
+            this.hideCard();
+          };
+          card.addEventListener('transitionend', done, { once: true });
+          setTimeout(done, 400);
+        }
+      };
+
+      const onEnd = () => {
+        if (startX != null) {
+          card.style.transition = 'transform .2s ease-out';
+          card.style.transform = '';
+        }
+        dragging = false;
+        startX = null;
+        this.touchCard();
+      };
+
+      card.addEventListener('mousedown', (ev) => {
+        if (ev.target === card) onStart(ev.clientX);
+      });
+      card.addEventListener('mousemove', (ev) => {
+        if (ev.target === card) onMove(ev.clientX);
+      });
+      card.addEventListener('mouseup', (ev) => {
+        if (ev.target === card) onEnd(ev.clientX);
+      });
+      card.addEventListener('touchstart', (ev) => onStart(ev.touches[0].clientX), { passive: true });
+      card.addEventListener('touchmove', (ev) => onMove(ev.touches[0].clientX), { passive: true });
+      card.addEventListener('touchend', () => onEnd(), { passive: true });
+      card.addEventListener('touchcancel', () => onEnd(), { passive: true });
+    }
+
+    toggleMmenu(btn) {
+      const menu = this.el.mmenu;
       const wasHidden = menu.hidden;
-      this.dismissMenus();
+      this.touchCard();
       if (wasHidden) {
-        const s = store.get();
-        const host = hostOf(location.href);
-        const langs = listLanguages();
-        const options = [`<option value="${AUTO}"${s.sourceLang === AUTO ? ' selected' : ''}>${esc(t().detect)}</option>`]
-          .concat(
-            langs.map(
-              (l) =>
-                `<option value="${esc(l.code)}"${l.code === s.targetLang ? ' selected' : ''}>${esc(`${l.flag} ${l.native} (${l.en})`)}</option>`,
-            ),
-          )
-          .join('');
-        menu.innerHTML = `
-          <button class="mt-dropup__item" type="button" data-mact="language">
-            ${isKO ? '번역 언어 변경' : 'Choose another language'}
-            <small>${esc(langShort(s.targetLang))}</small>
-            <select class="mt-dropup__select" data-mact="langselect">${options}</select>
-          </button>
-          <button class="mt-dropup__item" type="button" data-mact="engine">
-            ${isKO ? '번역 엔진' : 'Translation engine'}
-            <small>${esc(s.engineId === 'auto' ? t().engineAuto : (ENGINE_BY_ID.get(s.engineId) || {}).label || s.engineId)}</small>
-          </button>
-          <button class="mt-dropup__item" type="button" data-mact="selection">
-            ${isKO ? '드래그 번역' : 'Translate selected text'}
-            <small>${s.selectionBubble ? (isKO ? '켜짐' : 'On') : (isKO ? '꺼짐' : 'Off')}</small>
-          </button>
-          <button class="mt-dropup__item" type="button" data-mact="never">
-            ${isKO ? '이 사이트 번역 안 함' : 'Never translate this site'}
-            <small>${esc(host)}</small>
-          </button>
-          <button class="mt-dropup__item" type="button" data-mact="settings">${isKO ? '설정' : 'More options'}</button>`;
+        this.renderMmenu();
         menu.hidden = false;
         btn.setAttribute('aria-expanded', 'true');
       }
     }
 
-    handleMobileAction(action, node) {
+    renderMmenu() {
       const s = store.get();
-      if (action === 'language') return; // the native <select> handles it
+      const host = hostOf(location.href);
+      const langs = listLanguages();
+      const check = (on) => `<span class="mt-mmenu__check">${on ? '✔' : ''}</span>`;
+      const langOptions = [`<option value="${AUTO}"${s.sourceLang === AUTO ? ' selected' : ''}>${esc(t().detect)}</option>`]
+        .concat(
+          langs.map(
+            (l) =>
+              `<option value="${esc(l.code)}"${l.code === s.targetLang ? ' selected' : ''}>${esc(`${l.flag} ${l.native} (${l.en})`)}</option>`,
+          ),
+        )
+        .join('');
+      this.el.mmenu.innerHTML = `
+        <div class="mt-mmenu__row" data-mact="language">
+          <span>${isKO ? '다른 언어 선택' : 'Choose another language'}</span>
+          <select class="mt-mcard__select" data-mact="langselect" aria-label="${isKO ? '번역 언어' : 'Translate into'}">${langOptions}</select>
+        </div>
+        <div class="mt-mmenu__row" data-mact="never">
+          <span>${isKO ? '이 사이트는 번역 안 함' : 'Never translate this site'}</span>
+          ${check(matchesList(host, s.neverSites))}
+        </div>
+        <div class="mt-mmenu__row" data-mact="selection">
+          <span>${isKO ? '선택 문장 번역 버튼 표시' : 'Show the button to translate the selected text'}</span>
+          ${check(s.selectionBubble)}
+        </div>
+        <div class="mt-mmenu__row" data-mact="keep">
+          <span>${isKO ? '화면에 계속 띄워두기' : 'Keep on screen'}</span>
+          ${check(s.mobileKeepOnScreen)}
+        </div>
+        <div class="mt-mmenu__row" data-mact="position">
+          <span>${isKO ? '위치 변경' : 'Change position'}</span>
+          <span class="mt-mmenu__check">${s.mobilePosition === 'top' ? (isKO ? '위' : 'Top') : (isKO ? '아래' : 'Bottom')}</span>
+        </div>
+        <div class="mt-mmenu__row" data-mact="settings">
+          <span>${isKO ? '설정' : 'More options'}</span>
+        </div>`;
+    }
+
+    handleMobileAction(action) {
+      const s = store.get();
+      const host = hostOf(location.href);
       if (action === 'settings') {
-        this.dismissMenus();
+        this.hideCard();
         this.showSettings();
         return;
       }
       if (action === 'selection') {
         store.set({ selectionBubble: !s.selectionBubble });
-        this.toast(store.get().selectionBubble ? (isKO ? '드래그 번역을 켰습니다.' : 'Selection translation on') : (isKO ? '드래그 번역을 껐습니다.' : 'Selection translation off'));
+      } else if (action === 'keep') {
+        store.set({ mobileKeepOnScreen: !s.mobileKeepOnScreen });
+        if (!store.get().mobileKeepOnScreen) this.startCardTimer();
+        else this.stopCardTimer();
+      } else if (action === 'position') {
+        store.set({ mobilePosition: store.get().mobilePosition === 'top' ? 'bottom' : 'top' });
+        this.touchCard();
       } else if (action === 'never') {
-        const host = hostOf(location.href);
         const next = Array.isArray(s.neverSites) ? s.neverSites.slice() : [];
         const idx = next.findIndex((x) => hostOf(x) === host);
         if (idx === -1) next.push(host);
         else next.splice(idx, 1);
         store.set({ neverSites: next });
-        this.toast(
-          matchesList(host, store.get().neverSites)
-            ? (isKO ? '이 사이트를 번역 목록에서 제외했습니다.' : 'Site excluded')
-            : (isKO ? '이 사이트를 다시 번역합니다.' : 'Site included again'),
-        );
-      } else if (action === 'engine') {
-        const ids = ['auto', ...ENGINES.map((e) => e.id)];
-        const cur = s.engineId === 'auto' ? 0 : ids.indexOf(s.engineId);
-        const nextId = ids[(cur + 1) % ids.length];
-        store.set({ engineId: nextId });
-        this.toast(
-          nextId === 'auto'
-            ? t().engineAuto
-            : `${(ENGINE_BY_ID.get(nextId) || {}).label || nextId}`,
-        );
+        this.touchCard();
       }
-      const moreBtn = this.root.querySelector('[data-mbar="menu"]');
-      this.toggleDropup(moreBtn);
+      this.renderMmenu();
     }
 
     setProgress(done, total) {
@@ -3671,11 +3826,19 @@ html[data-theme="dark"] .mt-bi, body[data-mt-theme="dark"] .mt-bi { color: #bdc1
     // Reflect a detected language into the source selector once, quietly.
     (async () => {
       const s = store.get();
+      if (isMobile() && !shouldAutoTranslate()) {
+        // TWP greets you with its card when the page is not in your language.
+        const detected = await service.detect(app.sampleText());
+        if (detected && normalizeLang(detected) !== normalizeLang(s.targetLang)) {
+          service.lastDetected = detected;
+          store.set({ lastDetected: detected });
+          app.ui.showCard();
+          return;
+        }
+      }
       if (s.sourceLang === AUTO && app.sampleText().length > 80) {
         const detected = await service.detect(app.sampleText());
-        if (detected && detected !== s.targetLang) {
-          store.set({ lastDetected: detected });
-        }
+        if (detected && detected !== s.targetLang) store.set({ lastDetected: detected });
       }
     })();
 

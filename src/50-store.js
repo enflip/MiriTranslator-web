@@ -23,6 +23,10 @@
     neverSites: [],
     /** Floating button visibility — off by default; the shortcut opens the popup. */
     showFab: false,
+    /** Mobile card position: top | bottom (TWP-style). */
+    mobilePosition: 'top',
+    /** Keep the mobile card on screen instead of auto-hiding after 8s. */
+    mobileKeepOnScreen: false,
     /** auto | light | dark */
     theme: 'auto',
     /** Selection bubble. */
